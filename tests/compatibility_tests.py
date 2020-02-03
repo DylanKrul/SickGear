@@ -3,6 +3,7 @@ import unittest
 import subprocess
 import os
 
+
 class CompatibilityTests(unittest.TestCase):
 
     def test_except(self):
@@ -14,7 +15,7 @@ class CompatibilityTests(unittest.TestCase):
                     if x.endswith('.py'):
                         pyfiles.append(os.path.join(dirpath, x))
 
-        pyfiles.append(os.path.join(path,'SickBeard.py'))
+        pyfiles.append(os.path.join(path, 'sickgear.py'))
 
         output = subprocess.Popen('2to3'
                                   ' -f except'
@@ -26,6 +27,7 @@ class CompatibilityTests(unittest.TestCase):
             print(output)
             self.fail('Python 2/3 incompatibility detected')
 
-if __name__ == '__main__':
+
+if '__main__' == __name__:
     suite = unittest.TestLoader().loadTestsFromTestCase(QualityTests)
     unittest.TextTestRunner(verbosity=2).run(suite)

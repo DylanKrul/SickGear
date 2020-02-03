@@ -43,7 +43,7 @@ $.tablesorter.addParser({
 	type: 'numeric'
 });
 
-function valueDownloads(s) {
+var valueDownloads = (function(s){
 	var match = s.match(/^(\?|\d+)(?:[^/]+[^\d]+(\d+))?$/);
 
 	if (null == match || '?' == match[1])
@@ -59,7 +59,11 @@ function valueDownloads(s) {
 		finalNum += dlCnt;
 
 	return finalNum;
-}
+}),
+
+llUpdate = (function(){
+	$.ll.handleScroll();
+});
 
 $(document).ready(function () {
 	if (config.homeSearchFocus) {
@@ -79,7 +83,7 @@ $(document).ready(function () {
 
 	$('div[id^="progressbar"]').each(function (k, v) {
 		var progress = parseInt($(this).siblings('span[class="sort-data"]').attr('data-progress'), 10),
-			elId = '#' + $(this).attr('id');
+			elId = '[id="' + $(this).attr('id') + '"]';
 		v = 80;
 		$(elId).progressbar({value: progress});
 		if (progress < v) {
@@ -109,6 +113,7 @@ $(document).ready(function () {
 					break;
 			}
 
+			$(obj).one('layoutComplete', llUpdate);
 			$(obj).isotope({
 				itemSelector: '.show-card',
 				sortBy: sortCriteria,
@@ -144,6 +149,7 @@ $(document).ready(function () {
 
 			$('#postersort').on('change', function () {
 				var sortValue = this.value;
+				$(obj).one('layoutComplete', llUpdate);
 				$(obj).isotope({sortBy: sortValue});
 				$.get(this.options[this.selectedIndex].getAttribute('data-sort'));
 			});
@@ -151,12 +157,16 @@ $(document).ready(function () {
 			$('#postersortdirection').on('change', function () {
 				var sortDirection = this.value;
 				sortDirection = sortDirection == 'true';
+				$(obj).one('layoutComplete', llUpdate);
 				$(obj).isotope({sortAscending: sortDirection});
 				$.get(this.options[this.selectedIndex].getAttribute('data-sort'));
 			});
 		});
+
 		$('#search_show_name').on('input', function() {
-			$('.container').isotope({
+			var obj = $('.container');
+			obj.one('layoutComplete', llUpdate);
+			obj.isotope({
 				filter: function () {
 					return 0 <= $(this).attr('data-name').toLowerCase().indexOf(
 							$('#search_show_name').val().toLowerCase());
@@ -198,6 +208,7 @@ $(document).ready(function () {
 			$.tablesorter.filter.bindSearch($(obj), $('.search'));
 		});
 	}
+	llUpdate();
 	$('.resetshows').click(function() {
 		var input = $('#search_show_name');
 		if ('' !== input.val()){

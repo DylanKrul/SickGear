@@ -21,10 +21,13 @@ import re
 import traceback
 
 from . import generic
-from sickbeard import logger
-from sickbeard.bs4_parser import BS4Parser
-from sickbeard.helpers import tryInt
-from lib.unidecode import unidecode
+from .. import logger
+from ..helpers import try_int
+
+from bs4_parser import BS4Parser
+
+from _23 import unidecode
+from six import iteritems
 
 
 class NcoreProvider(generic.TorrentProvider):
@@ -59,35 +62,37 @@ class NcoreProvider(generic.TorrentProvider):
 
         items = {'Cache': [], 'Season': [], 'Episode': [], 'Propers': []}
 
-        rc = dict((k, re.compile('(?i)' + v)) for (k, v) in {
-            'list': '.*?torrent_all', 'info': 'details', 'key': 'key=([^"]+)">Torrent let'}.iteritems())
-        for mode in search_params.keys():
+        rc = dict([(k, re.compile('(?i)' + v)) for (k, v) in iteritems({
+            'list': '.*?torrent_all', 'info': 'details', 'key': 'key=([^"]+)">Torrent let'})])
+        for mode in search_params:
             for search_string in search_params[mode]:
-                search_string = isinstance(search_string, unicode) and unidecode(search_string) or search_string
+                search_string = unidecode(search_string)
                 search_url = self.urls['search'] % search_string
 
                 # fetches 15 results by default, and up to 100 if allowed in user profile
                 html = self.get_url(search_url)
+                if self.should_skip():
+                    return results
 
                 cnt = len(items[mode])
                 try:
                     if not html or self._has_no_results(html):
                         raise generic.HaltParseException
 
-                    with BS4Parser(html, features=['html5lib', 'permissive']) as soup:
-                        torrent_table = soup.find('div', class_=rc['list'])
-                        torrent_rows = [] if not torrent_table else torrent_table.find_all('div', class_='box_torrent')
+                    parse_only = dict(div={'class': (lambda at: at and rc['list'].search(at))})
+                    with BS4Parser(html, parse_only=parse_only) as tbl:
+                        tbl_rows = [] if not tbl else tbl.find_all('div', class_='box_torrent')
                         key = rc['key'].findall(html)[0]
 
-                        if not len(torrent_rows):
+                        if not len(tbl_rows):
                             raise generic.HaltParseException
 
-                        for tr in torrent_rows:
+                        for tr in tbl_rows:
                             try:
-                                seeders, leechers, size = [tryInt(n, n) for n in [
+                                seeders, leechers, size = [try_int(n, n) for n in [
                                     tr.find('div', class_=x).get_text().strip()
-                                    for x in 'box_s2', 'box_l2', 'box_meret2']]
-                                if self._peers_fail(mode, seeders, leechers):
+                                    for x in ('box_s2', 'box_l2', 'box_meret2')]]
+                                if self._reject_item(seeders, leechers):
                                     continue
 
                                 anchor = tr.find('a', href=rc['info'])
@@ -101,7 +106,7 @@ class NcoreProvider(generic.TorrentProvider):
 
                 except generic.HaltParseException:
                     pass
-                except (StandardError, Exception):
+                except (BaseException, Exception):
                     logger.log(u'Failed to parse. Traceback: %s' % traceback.format_exc(), logger.ERROR)
 
                 self._log_search(mode, len(items[mode]) - cnt, search_url)

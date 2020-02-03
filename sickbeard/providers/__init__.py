@@ -16,73 +16,40 @@
 # You should have received a copy of the GNU General Public License
 # along with SickGear.  If not, see <http://www.gnu.org/licenses/>.
 
+import importlib
 from os import sys
 
-import os.path
+from . import generic, newznab
+from .newznab import NewznabConstants
+from .. import logger
 import sickbeard
 
-from . import generic
-from sickbeard import logger, encodingKludge as ek
-# usenet
-from . import newznab, omgwtfnzbs
-# torrent
-from . import alpharatio, beyondhd, bithdtv, bitmetv, btn, btscene, dh, \
-    fano, filelist, funfile, gftracker, grabtheinfo, hd4free, hdbits, hdspace, hdtorrents, \
-    iptorrents, limetorrents, morethan, nebulance, ncore, pisexy, pretome, privatehd, ptf, \
-    rarbg, revtt, scenetime, shazbat, speedcd, \
-    thepiratebay, torlock, torrentday, torrenting, torrentleech, \
-    torrentz2, tvchaosuk, zooqle
-# anime
-from . import anizb, tokyotoshokan
-# custom
-try:
-    from . import custom01
-except:
-    pass
+from _23 import decode_bytes, filter_list, filter_iter
+from six import iteritems, itervalues
 
-__all__ = ['omgwtfnzbs',
-           'alpharatio',
-           'anizb',
-           'beyondhd',
-           'bithdtv',
-           'bitmetv',
-           'btn',
-           'btscene',
-           'custom01',
-           'dh',
-           'fano',
-           'filelist',
-           'funfile',
-           'gftracker',
-           'grabtheinfo',
-           'hd4free',
-           'hdbits',
-           'hdspace',
-           'hdtorrents',
-           'iptorrents',
-           'limetorrents',
-           'morethan',
-           'nebulance',
-           'ncore',
-           'pisexy',
-           'pretome',
-           'privatehd',
-           'ptf',
-           'rarbg',
-           'revtt',
-           'scenetime',
-           'shazbat',
-           'speedcd',
-           'thepiratebay',
-           'torlock',
-           'torrentday',
-           'torrenting',
-           'torrentleech',
-           'torrentz2',
-           'tvchaosuk',
-           'zooqle',
-           'tokyotoshokan',
-           ]
+__all__ = [
+    # usenet
+    'omgwtfnzbs',
+    # torrent
+    'alpharatio', 'bb', 'bithdtv', 'blutopia', 'btn',
+    'custom01', 'custom11', 'dh', 'ettv', 'eztv', 'fano', 'filelist', 'funfile', 'grabtheinfo',
+    'hdbits', 'hdme', 'hdspace', 'hdtorrents', 'horriblesubs',
+    'immortalseed', 'iptorrents', 'limetorrents', 'magnetdl', 'milkie', 'morethan', 'nebulance', 'ncore', 'nyaa',
+    'pisexy', 'pretome', 'privatehd', 'ptf',
+    'rarbg', 'revtt', 'scenehd', 'scenetime', 'shazbat', 'showrss', 'skytorrents', 'snowfl', 'speedcd',
+    'thepiratebay', 'torlock', 'torrentday', 'torrenting', 'torrentleech',  'tvchaosuk',
+    'xspeeds', 'zooqle',
+    # anime
+    'tokyotoshokan',
+    ]
+for module in __all__:
+    try:
+        m = importlib.import_module('.' + module, 'sickbeard.providers')
+        globals().update({n: getattr(m, n) for n in m.__all__} if hasattr(m, '__all__')
+                         else dict(filter_iter(lambda t: '_' != t[0][0], iteritems(m.__dict__))))
+    except ImportError as e:
+        if 'custom' != module[0:6]:
+            raise e
 
 
 def sortedProviderList():
@@ -96,6 +63,14 @@ def sortedProviderList():
         if curModule in providerDict:
             newList.append(providerDict[curModule])
 
+    if not sickbeard.PROVIDER_ORDER:
+        nzb = filter_list(lambda p: p.providerType == generic.GenericProvider.NZB, itervalues(providerDict))
+        tor = filter_list(lambda p: p.providerType != generic.GenericProvider.NZB, itervalues(providerDict))
+        newList = sorted(filter_iter(lambda p: not p.anime_only, nzb), key=lambda v: v.get_id()) + \
+            sorted(filter_iter(lambda p: not p.anime_only, tor), key=lambda v: v.get_id()) + \
+            sorted(filter_iter(lambda p: p.anime_only, nzb), key=lambda v: v.get_id()) + \
+            sorted(filter_iter(lambda p: p.anime_only, tor), key=lambda v: v.get_id())
+
     # add any modules that are missing from that list
     for curModule in providerDict:
         if providerDict[curModule] not in newList:
@@ -105,12 +80,19 @@ def sortedProviderList():
 
 
 def makeProviderList():
-    return [x.provider for x in [getProviderModule(y) for y in __all__] if x]
+    providers = [x.provider for x in [getProviderModule(y) for y in __all__] if x]
+    import browser_ua
+    import zlib
+    headers = [1449593765, 1597250020, 1524942228]
+    for p in providers:
+        if abs(zlib.crc32(decode_bytes(p.name))) + 40000400 in headers:
+            p.headers.update({'User-Agent': browser_ua.get_ua()})
+    return providers
 
 
 def getNewznabProviderList(data):
     defaultList = [makeNewznabProvider(x) for x in getDefaultNewznabProviders().split('!!!')]
-    providerList = filter(lambda x: x, [makeNewznabProvider(x) for x in data.split('!!!')])
+    providerList = filter_list(lambda _x: _x, [makeNewznabProvider(x) for x in data.split('!!!')])
 
     seen_values = set()
     providerListDeduped = []
@@ -132,52 +114,43 @@ def getNewznabProviderList(data):
             providerList.append(curDefault)
         else:
             providerDict[curDefault.name].default = True
-            providerDict[curDefault.name].name = curDefault.name
-            providerDict[curDefault.name].url = curDefault.url
-            providerDict[curDefault.name].needs_auth = curDefault.needs_auth
-            providerDict[curDefault.name].search_mode = curDefault.search_mode
-            providerDict[curDefault.name].search_fallback = curDefault.search_fallback
-            providerDict[curDefault.name].enable_recentsearch = curDefault.enable_recentsearch
-            providerDict[curDefault.name].enable_backlog = curDefault.enable_backlog
+            for k in ('name', 'url', 'needs_auth', 'search_mode', 'search_fallback',
+                      'enable_recentsearch', 'enable_backlog', 'enable_scheduled_backlog',
+                      'server_type'):
+                setattr(providerDict[curDefault.name], k, getattr(curDefault, k))
 
-    return filter(lambda x: x, providerList)
+    return filter_list(lambda _x: _x, providerList)
 
 
-def makeNewznabProvider(configString):
-    if not configString:
+def makeNewznabProvider(config_string):
+    if not config_string:
         return None
 
-    search_mode = 'eponly'
-    search_fallback = 0
-    enable_recentsearch = 0
-    enable_backlog = 0
-
-    try:
-        values = configString.split('|')
-        if len(values) == 9:
-            name, url, key, cat_ids, enabled, search_mode, search_fallback, enable_recentsearch, enable_backlog = values
-        else:
-            name = values[0]
-            url = values[1]
-            key = values[2]
-            cat_ids = values[3]
-            enabled = values[4]
-    except ValueError:
-        logger.log(u"Skipping Newznab provider string: '" + configString + "', incorrect format", logger.ERROR)
+    values = config_string.split('|')
+    if 5 <= len(values):
+        name, url, enabled = values.pop(0), values.pop(0), values.pop(4-2)
+        params = dict()
+        for k, d in (('key', ''), ('cat_ids', ''), ('search_mode', 'eponly'), ('search_fallback', 0),
+                     ('enable_recentsearch', 0), ('enable_backlog', 0), ('enable_scheduled_backlog', 1),
+                     ('server_type', NewznabConstants.SERVER_DEFAULT)):
+            try:
+                params.update({k: values.pop(0)})
+            except IndexError:
+                params.update({k: d})
+    else:
+        logger.log(u'Skipping Newznab provider string: \'%s\', incorrect format' % config_string, logger.ERROR)
         return None
 
-    newznab = sys.modules['sickbeard.providers.newznab']
+    newznab_module = sys.modules['sickbeard.providers.newznab']
 
-    newProvider = newznab.NewznabProvider(name, url, key=key, cat_ids=cat_ids, search_mode=search_mode,
-                                          search_fallback=search_fallback, enable_recentsearch=enable_recentsearch,
-                                          enable_backlog=enable_backlog)
-    newProvider.enabled = enabled == '1'
+    newProvider = newznab_module.NewznabProvider(name, url, **params)
+    newProvider.enabled = '1' == enabled
 
     return newProvider
 
 
 def getTorrentRssProviderList(data):
-    providerList = filter(lambda x: x, [makeTorrentRssProvider(x) for x in data.split('!!!')])
+    providerList = filter_list(lambda _x: _x, [makeTorrentRssProvider(x) for x in data.split('!!!')])
 
     seen_values = set()
     providerListDeduped = []
@@ -187,11 +160,11 @@ def getTorrentRssProviderList(data):
             providerListDeduped.append(d)
             seen_values.add(value)
 
-    return filter(lambda x: x, providerList)
+    return filter_list(lambda _x: _x, providerList)
 
 
-def makeTorrentRssProvider(configString):
-    if not configString:
+def makeTorrentRssProvider(config_string):
+    if not config_string:
         return None
 
     cookies = None
@@ -199,36 +172,41 @@ def makeTorrentRssProvider(configString):
     search_fallback = 0
     enable_recentsearch = 0
     enable_backlog = 0
+    enable_scheduled_backlog = 1
 
     try:
-        values = configString.split('|')
-        if len(values) == 8:
+        values = config_string.split('|')
+        if 9 == len(values):
+            (name, url, cookies, enabled, search_mode, search_fallback,
+             enable_recentsearch, enable_backlog, enable_scheduled_backlog) = values
+        elif 8 == len(values):
             name, url, cookies, enabled, search_mode, search_fallback, enable_recentsearch, enable_backlog = values
         else:
             name = values[0]
             url = values[1]
             enabled = values[3]
     except ValueError:
-        logger.log(u"Skipping RSS Torrent provider string: '" + configString + "', incorrect format",
+        logger.log(u"Skipping RSS Torrent provider string: '" + config_string + "', incorrect format",
                    logger.ERROR)
         return None
 
     try:
         torrentRss = sys.modules['sickbeard.providers.rsstorrent']
-    except:
+    except (BaseException, Exception):
         return
 
     newProvider = torrentRss.TorrentRssProvider(name, url, cookies, search_mode, search_fallback, enable_recentsearch,
-                                                enable_backlog)
-    newProvider.enabled = enabled == '1'
+                                                enable_backlog, enable_scheduled_backlog)
+    newProvider.enabled = '1' == enabled
 
     return newProvider
 
 
 def getDefaultNewznabProviders():
-    return '!!!'.join(['Sick Beard Index|http://lolo.sickbeard.com/|0|5030,5040|0|eponly|0|0|0',
+    return '!!!'.join(['Sick Beard Index|https://lolo.sickbeard.com/|0|5030,5040|0|eponly|0|0|0',
                        'NZBgeek|https://api.nzbgeek.info/||5030,5040|0|eponly|0|0|0',
-                       'NZBs.org|https://nzbs.org/||5030,5040|0|eponly|0|0|0',
+                       'DrunkenSlug|https://api.drunkenslug.com/||5030,5040|0|eponly|0|0|0',
+                       'NinjaCentral|https://ninjacentral.co.za/||5030,5040|0|eponly|0|0|0',
                        ])
 
 
@@ -241,12 +219,11 @@ def getProviderModule(name):
     raise Exception('Can\'t find %s%s in providers' % (prefix, name))
 
 
-def getProviderClass(id):
+def getProviderClass(provider_id):
     providerMatch = [x for x in
                      sickbeard.providerList + sickbeard.newznabProviderList + sickbeard.torrentRssProviderList if
-                     x.get_id() == id]
+                     provider_id == x.get_id()]
 
-    if len(providerMatch) != 1:
+    if 1 != len(providerMatch):
         return None
-    else:
-        return providerMatch[0]
+    return providerMatch[0]

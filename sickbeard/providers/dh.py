@@ -19,10 +19,12 @@ import re
 import traceback
 
 from . import generic
-from sickbeard import logger
-from sickbeard.bs4_parser import BS4Parser
-from sickbeard.helpers import tryInt
-from lib.unidecode import unidecode
+from .. import logger
+from ..helpers import try_int
+from bs4_parser import BS4Parser
+
+from _23 import unidecode
+from six import iteritems
 
 
 class DHProvider(generic.TorrentProvider):
@@ -33,8 +35,7 @@ class DHProvider(generic.TorrentProvider):
         self.url_base = 'https://www.digitalhive.org/'
         self.urls = {'config_provider_home_uri': self.url_base,
                      'login': self.url_base + 'getrss.php',
-                     'search': self.url_base + 'browse.php?search=%s&%s&titleonly=1&incldead=%s',
-                     'get': self.url_base + '%s'}
+                     'search': self.url_base + 'browse.php?search=%s&%s&titleonly=1&incldead=%s'}
 
         self.categories = {'Season': [34], 'Episode': [7, 32, 55, 57], 'anime': [2]}
         self.categories['Cache'] = self.categories['Season'] + self.categories['Episode']
@@ -46,7 +47,7 @@ class DHProvider(generic.TorrentProvider):
     def _authorised(self, **kwargs):
 
         return super(DHProvider, self)._authorised(
-            logged_in=(lambda y=None: (None is y or re.search('(?i)rss\slink', y)) and self.has_all_cookies() and
+            logged_in=(lambda y=None: (None is y or re.search(r'(?i)rss\slink', y)) and self.has_all_cookies() and
                        self.session.cookies['uid'] in self.digest and self.session.cookies['pass'] in self.digest),
             failed_msg=(lambda y=None: u'Invalid cookie details for %s. Check settings'))
 
@@ -58,37 +59,38 @@ class DHProvider(generic.TorrentProvider):
 
         items = {'Cache': [], 'Season': [], 'Episode': [], 'Propers': []}
 
-        rc = dict((k, re.compile('(?i)' + v)) for (k, v) in {'info': 'details', 'get': 'download'}.items())
-        for mode in search_params.keys():
+        rc = dict([(k, re.compile('(?i)' + v)) for (k, v) in iteritems({'info': 'details', 'get': 'download'})])
+        for mode in search_params:
             rc['cats'] = re.compile('(?i)cat=(?:%s)' % self._categories_string(mode, template='', delimiter='|'))
             for search_string in search_params[mode]:
-                search_string = isinstance(search_string, unicode) and unidecode(search_string) or search_string
+                search_string = unidecode(search_string)
 
                 html = self.get_url(self.urls['search'] % (
                     '+'.join(search_string.split()), self._categories_string(mode), ('3', '0')[not self.freeleech]))
+                if self.should_skip():
+                    return results
 
                 cnt = len(items[mode])
                 try:
                     if not html or self._has_no_results(html):
                         raise generic.HaltParseException
 
-                    with BS4Parser(html, features=['html5lib', 'permissive']) as soup:
-                        torrent_table = soup.find('table', attrs={'cellpadding': 0})
-                        torrent_rows = [] if not torrent_table else torrent_table.find_all('tr')
+                    with BS4Parser(html, parse_only=dict(table={'cellpadding': 0})) as tbl:
+                        tbl_rows = [] if not tbl else tbl.find_all('tr')
 
-                        if 2 > len(torrent_rows):
+                        if 2 > len(tbl_rows):
                             raise generic.HaltParseException
 
                         head = None
-                        for tr in torrent_rows[1:]:
+                        for tr in tbl_rows[1:]:
                             cells = tr.find_all('td')
                             if 6 > len(cells):
                                 continue
                             try:
                                 head = head if None is not head else self._header_row(tr)
-                                seeders, leechers, size = [tryInt(n, n) for n in [
-                                    cells[head[x]].get_text().strip() for x in 'seed', 'leech', 'size']]
-                                if self._peers_fail(mode, seeders, leechers) or not tr.find('a', href=rc['cats']):
+                                seeders, leechers, size = [try_int(n, n) for n in [
+                                    cells[head[x]].get_text().strip() for x in ('seed', 'leech', 'size')]]
+                                if not tr.find('a', href=rc['cats']) or self._reject_item(seeders, leechers):
                                     continue
 
                                 title = tr.find('a', href=rc['info']).get_text().strip()
@@ -101,7 +103,7 @@ class DHProvider(generic.TorrentProvider):
 
                 except generic.HaltParseException:
                     pass
-                except (StandardError, Exception):
+                except (BaseException, Exception):
                     logger.log(u'Failed to parse. Traceback: %s' % traceback.format_exc(), logger.ERROR)
 
                 self._log_search(mode, len(items[mode]) - cnt, self.session.response.get('url'))

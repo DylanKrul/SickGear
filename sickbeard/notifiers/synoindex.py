@@ -16,75 +16,56 @@
 # You should have received a copy of the GNU General Public License
 # along with SickGear.  If not, see <http://www.gnu.org/licenses/>.
 
-
-
 import os
-import subprocess
 
-import sickbeard
-
-from sickbeard import logger
-from sickbeard import encodingKludge as ek
-from sickbeard.exceptions import ex
+from .generic import BaseNotifier
+# noinspection PyPep8Naming
+import encodingKludge as ek
+from exceptions_helper import ex
 
 
-class synoIndexNotifier:
-    def notify_snatch(self, ep_name):
-        pass
-
-    def notify_download(self, ep_name):
-        pass
-
-    def notify_subtitle_download(self, ep_name, lang):
-        pass
-        
-    def notify_git_update(self, new_version):
-        pass
+# noinspection PyPep8Naming
+class SynoIndexNotifier(BaseNotifier):
 
     def moveFolder(self, old_path, new_path):
-        self.moveObject(old_path, new_path)
+        self._move_object(old_path, new_path)
 
     def moveFile(self, old_file, new_file):
-        self.moveObject(old_file, new_file)
+        self._move_object(old_file, new_file)
 
-    def moveObject(self, old_path, new_path):
-        if sickbeard.USE_SYNOINDEX:
-            synoindex_cmd = ['/usr/syno/bin/synoindex', '-N', ek.ek(os.path.abspath, new_path),
-                             ek.ek(os.path.abspath, old_path)]
-            logger.log(u'Executing command ' + str(synoindex_cmd), logger.DEBUG)
-            logger.log(u'Absolute path to command: ' + ek.ek(os.path.abspath, synoindex_cmd[0]), logger.DEBUG)
-            try:
-                p = subprocess.Popen(synoindex_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                     cwd=sickbeard.PROG_DIR)
-                out, err = p.communicate()  #@UnusedVariable
-                logger.log(u'Script result: ' + str(out), logger.DEBUG)
-            except OSError as e:
-                logger.log(u'Unable to run synoindex: ' + ex(e), logger.ERROR)
+    def _cmdline_run(self, synoindex_cmd):
+        self._log_debug(u'Executing command ' + str(synoindex_cmd))
+        self._log_debug(u'Absolute path to command: ' + ek.ek(os.path.abspath, synoindex_cmd[0]))
+        try:
+            from sickbeard.helpers import cmdline_runner
+            output, err, exit_status = cmdline_runner(synoindex_cmd)
+            self._log_debug(u'Script result: %s' % output)
+        except OSError as e:
+            self._log_error(u'Unable to run synoindex: ' + ex(e))
+
+    def _move_object(self, old_path, new_path):
+        if self.is_enabled():
+            self._cmdline_run(['/usr/syno/bin/synoindex', '-N', ek.ek(os.path.abspath, new_path),
+                               ek.ek(os.path.abspath, old_path)])
 
     def deleteFolder(self, cur_path):
-        self.makeObject('-D', cur_path)
+        self._make_object('-D', cur_path)
 
     def addFolder(self, cur_path):
-        self.makeObject('-A', cur_path)
+        self._make_object('-A', cur_path)
 
     def deleteFile(self, cur_file):
-        self.makeObject('-d', cur_file)
+        self._make_object('-d', cur_file)
 
     def addFile(self, cur_file):
-        self.makeObject('-a', cur_file)
+        self._make_object('-a', cur_file)
 
-    def makeObject(self, cmd_arg, cur_path):
-        if sickbeard.USE_SYNOINDEX:
-            synoindex_cmd = ['/usr/syno/bin/synoindex', cmd_arg, ek.ek(os.path.abspath, cur_path)]
-            logger.log(u'Executing command ' + str(synoindex_cmd), logger.DEBUG)
-            logger.log(u'Absolute path to command: ' + ek.ek(os.path.abspath, synoindex_cmd[0]), logger.DEBUG)
-            try:
-                p = subprocess.Popen(synoindex_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                     cwd=sickbeard.PROG_DIR)
-                out, err = p.communicate()  #@UnusedVariable
-                logger.log(u'Script result: ' + str(out), logger.DEBUG)
-            except OSError as e:
-                logger.log(u'Unable to run synoindex: ' + ex(e), logger.ERROR)
+    def _make_object(self, cmd_arg, cur_path):
+        if self.is_enabled():
+            self._cmdline_run(['/usr/syno/bin/synoindex', cmd_arg, ek.ek(os.path.abspath, cur_path)])
+
+    def update_library(self, ep_obj=None, **kwargs):
+        self.addFile(ep_obj.location)
 
 
-notifier = synoIndexNotifier
+notifier = SynoIndexNotifier

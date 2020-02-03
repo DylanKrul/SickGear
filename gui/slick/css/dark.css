@@ -1,24 +1,34 @@
 /* =======================================================================
 inc_top.tmpl
 ========================================================================== */
+.shows-not-found.n .snf .sgicon-warning,
 .navbar-default .navbar-nav .logger.errors.n,
 pre .prelight{
 	color:#c3ed9b
 }
 
+.shows-not-found.nn .snf .sgicon-warning,
 .navbar-default .navbar-nav .logger.errors.nn,
 pre .prelight2{
 	color:#f6ff41
 }
 
+.shows-not-found.nnn .snf .sgicon-warning,
 .navbar-default .navbar-nav .logger.errors.nnn,
 pre .prelight-num{
 	color:#ffba57
 }
 
+.shows-not-found.nnnn .snf .sgicon-warning,
 .navbar-default .navbar-nav .logger.errors.nnnn{
 	color:#ff6d5e
 }
+
+.snf .pulse,
+.shows-not-found.n .snf .pulse{ border-color:#c3ed9b }
+.shows-not-found.nn .snf .pulse{ border-color:#f6ff41 }
+.shows-not-found.nnn .snf .pulse{ border-color:#ffba57 }
+.shows-not-found.nnnn .snf .pulse{ border-color:#ff6d5e }
 
 [class^="icon-"],
 [class*=" icon-"]{
@@ -62,10 +72,16 @@ pre .prelight-num{
 	color:#ddd
 }
 
+.ui-widget.ui-widget-content{
+	border-color:#222
+}
+
+.component-group.bubblelist a,
 .ui-widget-content a{
 	color:#2d8fbf
 }
 
+.component-group.bubblelist a:hover,
 .ui-widget-content a:hover{
 	color:#09a2ff
 }
@@ -77,11 +93,17 @@ pre .prelight-num{
 }
 
 .ui-state-default,
+.ui-widget.ui-button,
+.ui-widget.ui-button:active,
 .ui-widget-content .ui-state-default,
 .ui-widget-header .ui-state-default{
 	background:#3d3d3d;
 	color:#fff;
 	border:1px solid #111
+}
+
+.ui-widget.ui-button:hover{
+	border-color:#111
 }
 
 .ui-state-hover,
@@ -125,21 +147,29 @@ pre .prelight-num{
 }
 
 .ui-state-hover .ui-icon,
-.ui-state-focus .ui-icon{
+.ui-state-focus .ui-icon,
+.ui-button:hover .ui-icon,
+.ui-button:focus .ui-icon{
 	background-image:url("../css/lib/images/ui-icons_222222_256x240.png")
 }
 
-.ui-state-active .ui-icon{
+.ui-state-active .ui-icon,
+.ui-button:active .ui-icon{
 	background-image:url("../css/lib/images/ui-icons_8c291d_256x240.png")
 }
 
-.ui-state-highlight .ui-icon{
+.ui-state-highlight .ui-icon,
+.ui-button .ui-state-highlight.ui-icon{
 	background-image:url("../css/lib/images/ui-icons_2e83ff_256x240.png")
 }
 
 .ui-state-error .ui-icon,
 .ui-state-error-text .ui-icon{
 	background-image:url("../css/lib/images/ui-icons_cd0a0a_256x240.png")
+}
+
+.ui-button .ui-icon{
+	background-image:url("../css/lib/images/ui-icons_09a2ff_256x240.png")
 }
 
 .ui-widget-overlay{
@@ -275,11 +305,13 @@ a.ui-font{
 	background-image:linear-gradient(to left, rgba(51, 51, 51, 1), rgba(51, 51, 51, 0))
 }
 
+.show-toggle-hide,
 td.tvShow a{
 	color:#ddd;
 	text-decoration:none
 }
 
+.show-toggle-hide:hover,
 td.tvShow a:hover span,
 td.tvShow a:hover{
 	cursor:pointer;
@@ -304,7 +336,7 @@ home_newShow.tmpl
 	border:0
 }
 
-.step-one #searchResults .alt{
+.step-one #search-results .alt{
 	background-color:rgb(40, 40, 40)
 }
 
@@ -312,6 +344,7 @@ home_newShow.tmpl
 	color:#707070
 }
 
+.btn-inverse.dark-bg,
 #addRootDirTable td label .filepath,
 .grey-text{color:#999}
 .highlight-text{color:#fff}
@@ -465,6 +498,8 @@ body#display-show.back-art .displayshow-wrapper .label a:focus{
 .translucent.pro.ii .day-of-week .day-number,
 .back-art.pro.ii .sickbeardTable .seasoncols th,
 .translucent.pro.ii .sickbeardTable .seasoncols th,
+#display-show.back-art.pro.ii .sickbeardTable .seasoncols th,
+#display-show.translucent.pro.ii .sickbeardTable .seasoncols th,
 .back-art.pro.ii .sickbeardTable thead .seasoncols td,
 .translucent.pro.ii .sickbeardTable thead .seasoncols td{
 	background-color:rgba(21, 82, 143, 0.5)
@@ -616,17 +651,23 @@ config*.tmpl
 	border-bottom:1px dotted #666
 }
 
+.qr-btn .glyphicon-qrcode,
 .component-group-desc p{
 	color:#ddd
 }
 
-.testNotification{
+.dotted-surround,
+.test-notification{
 	border:1px dotted #ccc
 }
 
 #provider_order_list li,
 #service_order_list li{
 	color:#ddd
+}
+
+.provider-enabled{
+	box-shadow:-26px 0 0 0 rgb(21, 82, 143) inset
 }
 
 #service_order_list li{
@@ -732,6 +773,60 @@ manage*.tmpl
 
 a.whitelink{
 
+}
+
+/* TABLE BACKGROUND color */
+.provider-failures.hover-highlight td:before,
+.provider-failures.focus-highlight td:before{
+	background:#222
+}
+
+/* ODD ZEBRA STRIPE color (needs zebra widget) */
+.provider-failures.hover-highlight .odd td:before,
+.provider-failures.hover-highlight .odd th:before,
+.provider-failures.focus-highlight .odd td:before,
+.provider-failures.focus-highlight .odd th:before{
+	background:#333
+}
+/* EVEN ZEBRA STRIPE color (needs zebra widget) */
+.provider-failures.hover-highlight .even td:before,
+.provider-failures.hover-highlight .even th:before,
+.provider-failures.focus-highlight .even td:before,
+.provider-failures.focus-highlight .even th:before{
+	background-color:#2e2e2e
+}
+
+/* HOVER ROW highlight colors */
+.provider-failures.hover-highlight tbody > tr:hover > td, /* override tablesorter theme row hover */
+.provider-failures.hover-highlight tbody > tr.odd:hover > td,
+.provider-failures.hover-highlight tbody > tr.even:hover > td{
+	background-color:#282828
+}
+/* HOVER COLUMN highlight colors */
+.provider-failures.hover-highlight tbody tr th:hover::after,
+.provider-failures.hover-highlight tbody tr td:hover::after{
+	background-color:#282828
+}
+
+/* FOCUS ROW highlight color (touch devices) */
+.provider-failures.focus-highlight td:focus::before,
+.provider-failures.focus-highlight th:focus::before{
+	background-color:#181818
+}
+/* FOCUS COLUMN highlight color (touch devices) */
+.provider-failures.focus-highlight td:focus::after,
+.provider-failures.focus-highlight th:focus::after{
+	background-color:#181818
+}
+/* FOCUS CELL highlight color */
+.provider-failures.focus-highlight th:focus,
+.provider-failures.focus-highlight td:focus,
+.provider-failures.focus-highlight .odd th:focus,
+.provider-failures.focus-highlight .odd td:focus,
+.provider-failures.focus-highlight .even th:focus,
+.provider-failures.focus-highlight .even td:focus{
+	background-color:#181818;
+	color:#ddd
 }
 
 /* =======================================================================
@@ -897,16 +992,17 @@ fieldset[disabled] .navbar-default .btn-link:focus{
 	color:#ccc
 }
 
-.dropdown-menu > li > a:hover, .dropdown-menu > li > a:focus{
+.dropdown-menu li > a{
+	color:#ddd
+}
+
+.dropdown-menu li > a:hover, .dropdown-menu li > a:focus{
 	color:#ddd;
 	text-decoration:none;
 	background-color:#15528f
 }
 
-.dropdown-menu > li > a{
-	color:#ddd
-}
-
+.component-group.bubblelist .bgcol,
 .dropdown-menu{
 	background-color:#333;
 	border:1px solid rgba(0, 0, 0, 0.15);
@@ -974,6 +1070,7 @@ fieldset[disabled] .navbar-default .btn-link:focus{
 	outline:thin dotted #333;
 	outline:5px auto -webkit-focus-ring-color;
 	outline-offset:-2px;
+	background-position:0;
 	color:#ddd
 }
 
@@ -1265,16 +1362,22 @@ input sizing (for config pages)
 ========================================================================== */
 
 .showlist-select optgroup,
+#set-status optgroup,
+#results-sortby optgroup,
 #pickShow optgroup,
 #showfilter optgroup,
+#showsort optgroup,
 #editAProvider optgroup{
 	color:#eee;
 	background-color:rgb(51, 51, 51)
 }
 
 .showlist-select optgroup option,
+#set-status optgroup option,
+#results-sortby optgroup option,
 #pickShow optgroup option,
 #showfilter optgroup option,
+#showsort optgroup option,
 #editAProvider optgroup option{
 	color:#222;
 	background-color:#ddd
@@ -1328,7 +1431,7 @@ div.stepsguide .step p{
 	color:#ccc
 }
 
-.stepDiv #searchResults div .exists-db{
+.stepDiv #search-results div .exists-db{
 	color:#1178B3
 }
 
@@ -1341,7 +1444,7 @@ div.formpaginate .prev, div.formpaginate .next{
 	background:#2265a1
 }
 
-#customQualityWrapper .tip-text p{
+#custom-quality-wrapper .tip-text p{
 	color:#999
 }
 
@@ -1451,65 +1554,18 @@ thead.tablesorter-stickyHeader{
 	color:#000
 }
 
-
 /* =======================================================================
-token-input.css
+token-input.css Overrides
 ========================================================================== */
 
-ul.token-input-list{
-	border:1px solid #ccc;
-	background-color:#ddd
-}
-
-ul.token-input-list li input{
-	border:0;
-	background-color:white
-}
-
-li.token-input-token{
-	background-color:#d0efa0;
-	color:#000
-}
-
-li.token-input-token span{
-	color:#777
-}
-
-li.token-input-selected-token{
-	background-color:#08844e;
-	color:#ddd
-}
-
-li.token-input-selected-token span{
-	color:#bbb
-}
-
-div.token-input-dropdown{
-	background-color:#ddd;
-	color:#000;
-	border-left-color:#ccc;
-	border-right-color:#ccc;
-	border-bottom-color:#ccc
-}
-
-div.token-input-dropdown p{
-	color:#777
-}
-
+ul.token-input-list,
+div.token-input-dropdown,
 div.token-input-dropdown ul li{
 	background-color:#ddd
 }
 
-div.token-input-dropdown ul li.token-input-dropdown-item{
-	background-color:#fafafa
-}
-
-div.token-input-dropdown ul li.token-input-dropdown-item2{
-	background-color:#ddd
-}
-
-div.token-input-dropdown ul li.token-input-selected-dropdown-item{
-	background-color:#6196c2
+li.token-input-selected-token{
+	color:#ddd
 }
 
 /* =======================================================================

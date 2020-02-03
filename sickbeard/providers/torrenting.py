@@ -19,10 +19,12 @@ import re
 import traceback
 
 from . import generic
-from sickbeard import logger
-from sickbeard.bs4_parser import BS4Parser
-from sickbeard.helpers import tryInt
-from lib.unidecode import unidecode
+from .. import logger
+from ..helpers import try_int
+from bs4_parser import BS4Parser
+
+from _23 import unidecode
+from six import iteritems
 
 
 class TorrentingProvider(generic.TorrentProvider):
@@ -30,11 +32,11 @@ class TorrentingProvider(generic.TorrentProvider):
     def __init__(self):
         generic.TorrentProvider.__init__(self, 'Torrenting')
 
-        self.url_home = ['https://%s/' % u for u in 'www.torrenting.com', 'ttonline.us']
+        self.url_home = ['https://%s/' % u for u in ('www.torrenting.com', 'ttonline.us')]
 
-        self.url_vars = {'login': 'rss.php', 'search': 'browse.php?%s&search=%s', 'get': '%s'}
+        self.url_vars = {'login': 'rss.php', 'search': 'browse.php?%s&search=%s'}
         self.url_tmpl = {'config_provider_home_uri': '%(home)s', 'login': '%(home)s%(vars)s',
-                         'search': '%(home)s%(vars)s', 'get': '%(home)s%(vars)s'}
+                         'search': '%(home)s%(vars)s'}
 
         self.categories = {'shows': [4, 5]}
 
@@ -45,7 +47,7 @@ class TorrentingProvider(generic.TorrentProvider):
         return super(TorrentingProvider, self)._authorised(
             logged_in=(lambda y='': all(
                 ['RSS link' in y, self.has_all_cookies()] +
-                [(self.session.cookies.get(x) or 'sg!no!pw') in self.digest for x in 'uid', 'pass'])),
+                [(self.session.cookies.get(x) or 'sg!no!pw') in self.digest for x in ('uid', 'pass')])),
             failed_msg=(lambda y=None: u'Invalid cookie details for %s. Check settings'))
 
     @staticmethod
@@ -60,38 +62,39 @@ class TorrentingProvider(generic.TorrentProvider):
 
         items = {'Cache': [], 'Season': [], 'Episode': [], 'Propers': []}
 
-        rc = dict((k, re.compile('(?i)' + v)) for (k, v) in {
+        rc = dict([(k, re.compile('(?i)' + v)) for (k, v) in iteritems({
             'info': 'detail', 'cats': 'cat=(?:%s)' % self._categories_string(template='', delimiter='|'),
-            'get': 'download'}.items())
-        for mode in search_params.keys():
+            'get': 'download'})])
+        for mode in search_params:
             for search_string in search_params[mode]:
-                search_string = isinstance(search_string, unicode) and unidecode(search_string) or search_string
+                search_string = unidecode(search_string)
                 search_url = self.urls['search'] % (self._categories_string(), search_string)
 
                 html = self.get_url(search_url)
+                if self.should_skip():
+                    return results
 
                 cnt = len(items[mode])
                 try:
                     if not html or self._has_no_results(html):
                         raise generic.HaltParseException
 
-                    with BS4Parser(html, features=['html5lib', 'permissive']) as soup:
-                        torrent_table = soup.find('table', id='torrentsTable')
-                        torrent_rows = [] if not torrent_table else torrent_table.find_all('tr')
+                    with BS4Parser(html, parse_only=dict(table={'id': 'torrentsTable'})) as tbl:
+                        tbl_rows = [] if not tbl else tbl.find_all('tr')
 
-                        if 2 > len(torrent_rows):
+                        if 2 > len(tbl_rows):
                             raise generic.HaltParseException
 
                         head = None
-                        for tr in torrent_rows[1:]:
+                        for tr in tbl_rows[1:]:
                             cells = tr.find_all('td')
                             if 4 > len(cells):
                                 continue
                             try:
                                 head = head if None is not head else self._header_row(tr)
-                                seeders, leechers, size = [tryInt(n, n) for n in [
-                                    cells[head[x]].get_text().strip() for x in 'seed', 'leech', 'size']]
-                                if None is tr.find('a', href=rc['cats']) or self._peers_fail(mode, seeders, leechers):
+                                seeders, leechers, size = [try_int(n, n) for n in [
+                                    cells[head[x]].get_text().strip() for x in ('seed', 'leech', 'size')]]
+                                if None is tr.find('a', href=rc['cats']) or self._reject_item(seeders, leechers):
                                     continue
 
                                 info = tr.find('a', href=rc['info'])
@@ -105,7 +108,7 @@ class TorrentingProvider(generic.TorrentProvider):
 
                 except generic.HaltParseException:
                     pass
-                except (StandardError, Exception):
+                except (BaseException, Exception):
                     logger.log(u'Failed to parse. Traceback: %s' % traceback.format_exc(), logger.ERROR)
 
                 self._log_search(mode, len(items[mode]) - cnt, search_url)

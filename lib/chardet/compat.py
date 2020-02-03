@@ -25,19 +25,12 @@ import sys
 if sys.version_info < (3, 0):
     PY2 = True
     PY3 = False
-    base_str = (str, unicode)
+    string_types = (str, unicode)
     text_type = unicode
-    bin_type = str
+    iteritems = dict.iteritems
 else:
     PY2 = False
     PY3 = True
-    base_str = (bytes, str)
+    string_types = (bytes, str)
     text_type = str
-    bin_type = (bytes, bytearray)
-
-
-def wrap_ord(a):
-    if PY2 and isinstance(a, base_str):
-        return ord(a)
-    else:
-        return a
+    iteritems = dict.items

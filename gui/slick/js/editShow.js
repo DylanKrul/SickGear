@@ -1,6 +1,7 @@
 /** @namespace $.SickGear.Root */
 /** @namespace config.showLang */
 /** @namespace config.showIsAnime */
+/** @namespace config.expandIds */
 /*globals $, config, sbRoot, generate_bwlist*/
 
 $(document).ready(function () {
@@ -11,7 +12,7 @@ $(document).ready(function () {
 		return ' class="flag" style="background-image:url(' + $.SickGear.Root + '/images/flags/' + lang + '.png)"'
 	}
 
-	$.getJSON($.SickGear.Root + '/home/addShows/getIndexerLanguages', {}, function (data) {
+	$.getJSON($.SickGear.Root + '/add-shows/get-infosrc-languages', {}, function (data) {
 		var result = '', currentLangAdded = '', selected = ' selected="selected"';
 
 		if (!data.results.length) {
@@ -35,7 +36,7 @@ $(document).ready(function () {
 				result += '<option value="' + config.showLang + '" ' + selected + '>' + config.showLang + '</option>';
 		}
 
-		$('#indexerLangSelectEdit').html(result);
+		$('#infosrc-lang-select-edit').html(result);
 	});
 
 	function getExceptions() {
@@ -67,7 +68,9 @@ $(document).ready(function () {
 		$('#SceneException').fadeIn('fast', 'linear');
 
 		var option = $('<option>');
-		option.attr('value', sceneExSeason + '|' + sceneEx);
+		if (null === sceneExSeason)
+			sceneExSeason = '-1';
+		option.val(sceneExSeason + '|' + sceneEx);
 		option.html((config.showIsAnime ? 'S' + ('-1' === sceneExSeason ? '*' : sceneExSeason) + ': ' : '') + sceneEx);
 
 		return option.appendTo($('#exceptions_list'));
@@ -82,7 +85,7 @@ $(document).ready(function () {
 	$.fn.toggle_SceneException = function () {
 		var elSceneException = $('#SceneException');
 
-		if (0 == getExceptions().length)
+		if (0 === getExceptions().length)
 			elSceneException.fadeOut('fast', 'linear');
 		else
 			elSceneException.fadeIn('fast', 'linear');
@@ -106,7 +109,7 @@ $(document).ready(function () {
 	if (checked(elAnime)) { isAnime(); }
 	if (checked(elScene)) { isScene(); }
 	if (checked(elABD)) { isABD(); }
-	if (checked(elSports)) { isSports() }
+	if (checked(elSports)) { isSports(); }
 
 	elAnime.on('click', function() {
 		if (checked(elAnime))
@@ -125,6 +128,8 @@ $(document).ready(function () {
 	elABD.on('click', function() { isABD(); });
 	elSports.on('click', function() { isSports() });
 
+	if (config.expandIds) { elIdMap.click(); }
+
 	function undef(value) {
 		return /undefined/i.test(typeof(value));
 	}
@@ -132,10 +137,10 @@ $(document).ready(function () {
 	function updateSrcLinks() {
 
 		var preventSave = !1, search = 'data-search';
-		$('[id^=mid-]').each(function (i, selected) {
+		$('[id^=mid-], #source-id').each(function (i, selected) {
 			var elSelected = $(selected),
-				okDigits = !(/[^\d]/.test(elSelected.val()) || ('' == elSelected.val())),
-				service = '#src-' + elSelected.attr('id'),
+				okDigits = !(/[^\d]/.test(elSelected.val()) || ('' === elSelected.val())),
+				service = (('source-id' === elSelected.attr('id')) ? '#src-' + elSelected.attr('name') : '#src-' + elSelected.attr('id')),
 				elLock = $('#lockid-' + service.replace(/.*?(\d+)$/, '$1')),
 				elService = $(service),
 				On = 'data-', Off = '', linkOnly = !1, newLink = '';
@@ -148,19 +153,27 @@ $(document).ready(function () {
 				}
 			}
 			$.each(['href', 'title', 'onclick'], function(i, attr) {
-				if ('n' == elService.attr(search)) {
+				if ('n' === elService.attr(search)) {
 					elService.attr(On + attr, elService.attr(Off + attr)).removeAttr(Off + attr);
 				}
 				if (linkOnly)
 					elService.attr(attr, elService.attr(search + '-' + attr));
 				elService.attr(search, linkOnly ? 'y' : 'n')
 			});
-			if (('' == Off) && !linkOnly) {
+			var title;
+			if (('' === Off) && !linkOnly) {
 				preventSave = !0;
+				title = elSelected.attr('title');
+				if (!/undefined/.test(title))
+					elSelected.attr({'data-title': title});
 				elSelected.addClass('warning').attr({title: 'Use digits (0-9)'});
 				elLock.prop('disabled', !0);
 			} else {
-				elSelected.removeClass('warning').removeAttr('title');
+				title = elSelected.attr('data-title');
+				if (!/undefined/.test(title))
+					elSelected.attr({'title': title}).removeAttr('data-title');
+				else
+					elSelected.removeClass('warning').removeAttr('title');
 				elLock.prop('disabled', !1);
 				if (!undef(elService.attr('href'))) {
 					if (!undef(elService.attr('data-href')) && linkOnly) {
@@ -176,36 +189,36 @@ $(document).ready(function () {
 		$('#save-mapping').prop('disabled', preventSave);
 	}
 
-	$('[id^=mid-]').on('input', function() {
+	$('[id^=mid-], #source-id').on('input', function() {
 		updateSrcLinks();
 	});
 
 	function saveMapping(paused, markWanted) {
 		var sbutton = $(this), mid = $('[id^=mid-]'), lock = $('[id^=lockid-]'),
 			allf = $('[id^=mid-], [id^=lockid-], #reset-mapping, [name^=set-master]'),
-			radio = $('[name^=set-master]:checked'), isMaster = !radio.length || 'the-master' == radio.attr('id'),
+			radio = $('[name^=set-master]:checked'), isMaster = !radio.length || ('the-master' === radio.attr('id') && $.trim($('#source-id').val()) == $('#prodid').val()),
 			panelSaveGet = $('#panel-save-get'), saveWait = $('#save-wait');
 
 		allf.prop('disabled', !0);
 		sbutton.prop('disabled', !0);
-		var param = {'show': $('#show').val()};
+		var param = {'tvid_prodid': $('#tvid_prodid').val()};
 		mid.each(function (i, selected) {
 			param[$(selected).attr('id')] = $(selected).val();
 		});
 		lock.each(function (i, selected) {
 			param[$(selected).attr('id')] = $(selected).prop('checked');
 		});
+		param['tvid'] = $('#tvid').val();
 		if (!isMaster) {
-			param['indexer'] = $('#indexer').val();
-			param['mindexer'] = radio.attr('data-indexer');
-			param['mindexerid'] = radio.attr('data-indexerid');
+			param['m_tvid'] = radio.attr('data-tvid');
+			param['m_prodid'] = $.trim(radio.closest('span').find('input:text').val());
 			param['paused'] = paused ? '1' : '0';
 			param['markwanted'] = markWanted ? '1' : '0';
 			panelSaveGet.removeClass('show').addClass('hide');
 			saveWait.removeClass('hide').addClass('show');
 		}
 
-		$.getJSON(sbRoot + '/home/saveMapping', param)
+		$.getJSON(sbRoot + '/home/save-mapping', param)
 		 	.done(function (data) {
 				allf.prop('disabled', !1);
 				sbutton.prop('disabled', !1);
@@ -214,19 +227,19 @@ $(document).ready(function () {
 				if (undef(data.error)) {
 					$.each(data.map, function (i, item) {
 						$('#mid-' + i).val(item.id);
-						$('#lockid-' + i).prop('checked', -100 == item.status)
+						$('#lockid-' + i).prop('checked', -100 === item.status)
 					});
 					/** @namespace data.switch */
-					/** @namespace data.switch.mid */
+					/** @namespace data.switch.mtvid_prodid */
 					if (!isMaster && data.hasOwnProperty('switch') && data.switch.hasOwnProperty('Success')) {
-						window.location.replace(sbRoot + '/home/displayShow?show=' + data.mid);
+						window.location.replace(sbRoot + '/home/view-show?tvid_prodid=' + data.mtvid_prodid);
 					} else if ((0 <  $('*[data-maybe-master=1]').length)
-						&& (((0 == $('[name^=set-master]').length) && (0 < $('*[data-maybe-master=1]').val()))
-						|| ((0 < $('[name^=set-master]').length) && (0 == $('*[data-maybe-master=1]').val())))) {
+						&& (((0 === $('[name^=set-master]').length) && (0 < $('*[data-maybe-master=1]').val()))
+						|| ((0 < $('[name^=set-master]').length) && (0 === $('*[data-maybe-master=1]').val())))) {
 						location.reload();
 					}
 				}})
-			.fail(function (data) {
+			.fail(function () {
 				allf.prop('disabled', !1);
 				sbutton.prop('disabled', !1);
 			});
@@ -239,7 +252,7 @@ $(document).ready(function () {
 		allf.prop('disabled', !0);
 		fbutton.prop('disabled', !0);
 
-		var param = {'show': $('#show').val()};
+		var param = {'tvid_prodid': $('#tvid_prodid').val()};
 		mid.each(function (i, selected) {
 			param[$(selected).attr('id')] = $(selected).val();
 		});
@@ -248,7 +261,7 @@ $(document).ready(function () {
 			param[$(selected).attr('id')] = $(selected).prop('checked');
 		});
 
-		$.getJSON(sbRoot + '/home/forceMapping', param)
+		$.getJSON(sbRoot + '/home/force-mapping', param)
 			.done(function (data) {
 				allf.prop('disabled', !1);
 				fbutton.prop('disabled', !1);
@@ -256,22 +269,21 @@ $(document).ready(function () {
 					$('#the-master').prop('checked', !0).trigger('click');
 					$.each(data, function (i, item) {
 						$('#mid-' + i).val(item.id);
-						$('#lockid-' + i).prop('checked', -100 == item.status);
+						$('#lockid-' + i).prop('checked', -100 === item.status);
 					});
 					updateSrcLinks();
 				}})
-			.fail(function (data) {
+			.fail(function () {
 				allf.prop('disabled', !1);
 				fbutton.prop('disabled', !1);
 			});
 	}
 
 	$('#save-mapping, #reset-mapping').click(function() {
-
-		var save = /save/i.test($(this).attr('id')),
-			radio = $('[name=set-master]:checked'), isMaster = !radio.length || 'the-master' == radio.attr('id'),
+		var save = /save/i.test(this.id),
+			radio = $('[name=set-master]:checked'), isMaster = !radio.length || ('the-master' === radio.attr('id') && $.trim($('#source-id').val()) == $('#prodid').val()),
 			newMaster = (save && !isMaster),
-			paused = 'on' == $('#paused:checked').val(),
+			paused = 'on' === $('#paused:checked').val(),
 			extraWarn = !newMaster ? '' : 'Warning: Changing the master source can produce undesirable'
 				+ ' results if episodes do not match at old and new TV info sources<br /><br />'
 				+ (paused ? '' : '<input type="checkbox" id="mark-wanted" style="margin-right:6px">'
@@ -286,7 +298,7 @@ $(document).ready(function () {
 				'Yes': {
 					'class': 'green',
 					'action': function () {
-						save ? saveMapping(paused, 'on' == $('#mark-wanted:checked').val()) : resetMapping()
+						save ? saveMapping(paused, 'on' === $('#mark-wanted:checked').val()) : resetMapping()
 					}
 				},
 				'No': {

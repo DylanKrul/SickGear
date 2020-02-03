@@ -18,20 +18,29 @@
 
 import os.path
 
+# noinspection PyPep8Naming
+import encodingKludge as ek
+
 import sickbeard
-from sickbeard import logger, processTV
-from sickbeard import encodingKludge as ek
+from . import logger, processTV
 
 
-class PostProcesser():
+class PostProcesser(object):
     def __init__(self):
         self.amActive = False
 
-    def run(self):
-        if not sickbeard.PROCESS_AUTOMATICALLY:
-            return
+    @staticmethod
+    def is_enabled():
+        return sickbeard.PROCESS_AUTOMATICALLY
 
-        self.amActive = True
+    def run(self):
+        if self.is_enabled():
+            self.amActive = True
+            self._main()
+            self.amActive = False
+
+    @staticmethod
+    def _main():
 
         if not ek.ek(os.path.isdir, sickbeard.TV_DOWNLOAD_DIR):
             logger.log(u"Automatic post-processing attempted but dir %s doesn't exist" % sickbeard.TV_DOWNLOAD_DIR,
@@ -43,6 +52,4 @@ class PostProcesser():
                        '(and probably not what you really want to process)' % sickbeard.TV_DOWNLOAD_DIR, logger.ERROR)
             return
 
-        processTV.processDir(sickbeard.TV_DOWNLOAD_DIR)
-
-        self.amActive = False
+        processTV.processDir(sickbeard.TV_DOWNLOAD_DIR, is_basedir=True)

@@ -16,16 +16,20 @@
 # You should have received a copy of the GNU General Public License
 # along with SickGear.  If not, see <http://www.gnu.org/licenses/>.
 
-import os.path
 import datetime
+import os.path
 import re
-import urlparse
+
+# noinspection PyPep8Naming
+import encodingKludge as ek
 
 import sickbeard
 import sickbeard.providers
-from sickbeard import encodingKludge as ek
-from sickbeard import helpers, logger, naming, db
+from . import db, helpers, logger, naming
 from lib.libtrakt import TraktAPI
+
+from _23 import filter_list, urlsplit, urlunsplit
+from six import string_types
 
 
 naming_ep_type = ('%(seasonnumber)dx%(episodenumber)02d',
@@ -49,13 +53,13 @@ naming_sep_type = (' - ', ' ')
 naming_sep_type_text = (' - ', 'space')
 
 
-def change_HTTPS_CERT(https_cert):
-    if https_cert == '':
+def change_https_cert(https_cert):
+    if '' == https_cert:
         sickbeard.HTTPS_CERT = ''
         return True
 
     if os.path.normpath(sickbeard.HTTPS_CERT) != os.path.normpath(https_cert):
-        if helpers.makeDir(os.path.dirname(os.path.abspath(https_cert))):
+        if helpers.make_dir(os.path.dirname(os.path.abspath(https_cert))):
             sickbeard.HTTPS_CERT = os.path.normpath(https_cert)
             logger.log(u'Changed https cert path to %s' % https_cert)
         else:
@@ -64,13 +68,13 @@ def change_HTTPS_CERT(https_cert):
     return True
 
 
-def change_HTTPS_KEY(https_key):
-    if https_key == '':
+def change_https_key(https_key):
+    if '' == https_key:
         sickbeard.HTTPS_KEY = ''
         return True
 
     if os.path.normpath(sickbeard.HTTPS_KEY) != os.path.normpath(https_key):
-        if helpers.makeDir(os.path.dirname(os.path.abspath(https_key))):
+        if helpers.make_dir(os.path.dirname(os.path.abspath(https_key))):
             sickbeard.HTTPS_KEY = os.path.normpath(https_key)
             logger.log(u'Changed https key path to %s' % https_key)
         else:
@@ -79,13 +83,13 @@ def change_HTTPS_KEY(https_key):
     return True
 
 
-def change_LOG_DIR(log_dir, web_log):
+def change_log_dir(log_dir, web_log):
     log_dir_changed = False
     abs_log_dir = os.path.normpath(os.path.join(sickbeard.DATA_DIR, log_dir))
     web_log_value = checkbox_to_value(web_log)
 
     if os.path.normpath(sickbeard.LOG_DIR) != abs_log_dir:
-        if helpers.makeDir(abs_log_dir):
+        if helpers.make_dir(abs_log_dir):
             sickbeard.ACTUAL_LOG_DIR = os.path.normpath(log_dir)
             sickbeard.LOG_DIR = abs_log_dir
 
@@ -102,13 +106,13 @@ def change_LOG_DIR(log_dir, web_log):
     return True
 
 
-def change_NZB_DIR(nzb_dir):
-    if nzb_dir == '':
+def change_nzb_dir(nzb_dir):
+    if '' == nzb_dir:
         sickbeard.NZB_DIR = ''
         return True
 
     if os.path.normpath(sickbeard.NZB_DIR) != os.path.normpath(nzb_dir):
-        if helpers.makeDir(nzb_dir):
+        if helpers.make_dir(nzb_dir):
             sickbeard.NZB_DIR = os.path.normpath(nzb_dir)
             logger.log(u'Changed NZB folder to %s' % nzb_dir)
         else:
@@ -117,13 +121,13 @@ def change_NZB_DIR(nzb_dir):
     return True
 
 
-def change_TORRENT_DIR(torrent_dir):
-    if torrent_dir == '':
+def change_torrent_dir(torrent_dir):
+    if '' == torrent_dir:
         sickbeard.TORRENT_DIR = ''
         return True
 
     if os.path.normpath(sickbeard.TORRENT_DIR) != os.path.normpath(torrent_dir):
-        if helpers.makeDir(torrent_dir):
+        if helpers.make_dir(torrent_dir):
             sickbeard.TORRENT_DIR = os.path.normpath(torrent_dir)
             logger.log(u'Changed torrent folder to %s' % torrent_dir)
         else:
@@ -132,13 +136,13 @@ def change_TORRENT_DIR(torrent_dir):
     return True
 
 
-def change_TV_DOWNLOAD_DIR(tv_download_dir):
-    if tv_download_dir == '':
+def change_tv_download_dir(tv_download_dir):
+    if '' == tv_download_dir:
         sickbeard.TV_DOWNLOAD_DIR = ''
         return True
 
     if os.path.normpath(sickbeard.TV_DOWNLOAD_DIR) != os.path.normpath(tv_download_dir):
-        if helpers.makeDir(tv_download_dir):
+        if helpers.make_dir(tv_download_dir):
             sickbeard.TV_DOWNLOAD_DIR = os.path.normpath(tv_download_dir)
             logger.log(u'Changed TV download folder to %s' % tv_download_dir)
         else:
@@ -147,16 +151,17 @@ def change_TV_DOWNLOAD_DIR(tv_download_dir):
     return True
 
 
-def change_AUTOPOSTPROCESSER_FREQUENCY(freq):
+def schedule_autopostprocesser(freq):
     sickbeard.AUTOPOSTPROCESSER_FREQUENCY = to_int(freq, default=sickbeard.DEFAULT_AUTOPOSTPROCESSER_FREQUENCY)
 
     if sickbeard.AUTOPOSTPROCESSER_FREQUENCY < sickbeard.MIN_AUTOPOSTPROCESSER_FREQUENCY:
         sickbeard.AUTOPOSTPROCESSER_FREQUENCY = sickbeard.MIN_AUTOPOSTPROCESSER_FREQUENCY
 
     sickbeard.autoPostProcesserScheduler.cycleTime = datetime.timedelta(minutes=sickbeard.AUTOPOSTPROCESSER_FREQUENCY)
+    sickbeard.autoPostProcesserScheduler.set_paused_state()
 
 
-def change_RECENTSEARCH_FREQUENCY(freq):
+def schedule_recentsearch(freq):
     sickbeard.RECENTSEARCH_FREQUENCY = to_int(freq, default=sickbeard.DEFAULT_RECENTSEARCH_FREQUENCY)
 
     if sickbeard.RECENTSEARCH_FREQUENCY < sickbeard.MIN_RECENTSEARCH_FREQUENCY:
@@ -165,13 +170,14 @@ def change_RECENTSEARCH_FREQUENCY(freq):
     sickbeard.recentSearchScheduler.cycleTime = datetime.timedelta(minutes=sickbeard.RECENTSEARCH_FREQUENCY)
 
 
-def change_BACKLOG_FREQUENCY(freq):
-    sickbeard.BACKLOG_FREQUENCY = minimax(freq, sickbeard.DEFAULT_BACKLOG_FREQUENCY, sickbeard.MIN_BACKLOG_FREQUENCY, sickbeard.MAX_BACKLOG_FREQUENCY)
+def schedule_backlog(freq):
+    sickbeard.BACKLOG_FREQUENCY = minimax(freq, sickbeard.DEFAULT_BACKLOG_FREQUENCY,
+                                          sickbeard.MIN_BACKLOG_FREQUENCY, sickbeard.MAX_BACKLOG_FREQUENCY)
 
     sickbeard.backlogSearchScheduler.action.cycleTime = sickbeard.BACKLOG_FREQUENCY
 
 
-def change_UPDATE_FREQUENCY(freq):
+def schedule_update(freq):
     sickbeard.UPDATE_FREQUENCY = to_int(freq, default=sickbeard.DEFAULT_UPDATE_FREQUENCY)
 
     if sickbeard.UPDATE_FREQUENCY < sickbeard.MIN_UPDATE_FREQUENCY:
@@ -180,35 +186,25 @@ def change_UPDATE_FREQUENCY(freq):
     sickbeard.versionCheckScheduler.cycleTime = datetime.timedelta(hours=sickbeard.UPDATE_FREQUENCY)
 
 
-def change_VERSION_NOTIFY(version_notify):
-    oldSetting = sickbeard.VERSION_NOTIFY
+def schedule_version_notify(version_notify):
+    old_setting = sickbeard.VERSION_NOTIFY
 
     sickbeard.VERSION_NOTIFY = version_notify
 
     if not version_notify:
         sickbeard.NEWEST_VERSION_STRING = None
 
-    if not oldSetting and version_notify:
+    if not old_setting and version_notify:
         sickbeard.versionCheckScheduler.action.run()
 
 
-def change_DOWNLOAD_PROPERS(download_propers):
-    if sickbeard.DOWNLOAD_PROPERS == download_propers:
-        return
-
-    sickbeard.DOWNLOAD_PROPERS = download_propers
-    if sickbeard.DOWNLOAD_PROPERS:
-        sickbeard.properFinderScheduler.start()
-    else:
-        sickbeard.properFinderScheduler.stop.set()
-        logger.log(u'Waiting for the PROPERFINDER thread to exit')
-        try:
-            sickbeard.properFinderScheduler.join(10)
-        except:
-            pass
+def schedule_download_propers(download_propers):
+    if sickbeard.DOWNLOAD_PROPERS != download_propers:
+        sickbeard.DOWNLOAD_PROPERS = download_propers
+        sickbeard.properFinderScheduler.set_paused_state()
 
 
-def change_USE_TRAKT(use_trakt):
+def schedule_trakt(use_trakt):
     if sickbeard.USE_TRAKT == use_trakt:
         return
 
@@ -216,7 +212,7 @@ def change_USE_TRAKT(use_trakt):
     # if sickbeard.USE_TRAKT:
     #     sickbeard.traktCheckerScheduler.start()
     # else:
-    #     sickbeard.traktCheckerScheduler.stop.set()
+    #     sickbeard.traktCheckerScheduler.stop()
     #     logger.log(u'Waiting for the TRAKTCHECKER thread to exit')
     #     try:
     #         sickbeard.traktCheckerScheduler.join(10)
@@ -224,30 +220,40 @@ def change_USE_TRAKT(use_trakt):
     #         pass
 
 
-def change_USE_SUBTITLES(use_subtitles):
-    if sickbeard.USE_SUBTITLES == use_subtitles:
-        return
-
-    sickbeard.USE_SUBTITLES = use_subtitles
-    if sickbeard.USE_SUBTITLES:
-        sickbeard.subtitlesFinderScheduler.start()
-    else:
-        sickbeard.subtitlesFinderScheduler.stop.set()
-        logger.log(u'Waiting for the SUBTITLESFINDER thread to exit')
-        try:
-            sickbeard.subtitlesFinderScheduler.join(10)
-        except:
-            pass
+def schedule_subtitles(use_subtitles):
+    if sickbeard.USE_SUBTITLES != use_subtitles:
+        sickbeard.USE_SUBTITLES = use_subtitles
+        sickbeard.subtitlesFinderScheduler.set_paused_state()
 
 
-def CheckSection(CFG, sec):
+def schedule_emby_watched(emby_watched_interval):
+    emby_watched_freq = minimax(emby_watched_interval, sickbeard.DEFAULT_WATCHEDSTATE_FREQUENCY,
+                                0, sickbeard.MAX_WATCHEDSTATE_FREQUENCY)
+    if emby_watched_freq and emby_watched_freq != sickbeard.EMBY_WATCHEDSTATE_FREQUENCY:
+        sickbeard.EMBY_WATCHEDSTATE_FREQUENCY = emby_watched_freq
+        sickbeard.embyWatchedStateScheduler.cycleTime = datetime.timedelta(minutes=emby_watched_freq)
+
+    sickbeard.EMBY_WATCHEDSTATE_SCHEDULED = bool(emby_watched_freq)
+    sickbeard.embyWatchedStateScheduler.set_paused_state()
+
+
+def schedule_plex_watched(plex_watched_interval):
+    plex_watched_freq = minimax(plex_watched_interval, sickbeard.DEFAULT_WATCHEDSTATE_FREQUENCY,
+                                0, sickbeard.MAX_WATCHEDSTATE_FREQUENCY)
+    if plex_watched_freq and plex_watched_freq != sickbeard.PLEX_WATCHEDSTATE_FREQUENCY:
+        sickbeard.PLEX_WATCHEDSTATE_FREQUENCY = plex_watched_freq
+        sickbeard.plexWatchedStateScheduler.cycleTime = datetime.timedelta(minutes=plex_watched_freq)
+
+    sickbeard.PLEX_WATCHEDSTATE_SCHEDULED = bool(plex_watched_freq)
+    sickbeard.plexWatchedStateScheduler.set_paused_state()
+
+
+def check_section(cfg, section):
     """ Check if INI section exists, if not create it """
-    try:
-        CFG[sec]
-        return True
-    except:
-        CFG[sec] = {}
+    if section not in cfg:
+        cfg[section] = {}
         return False
+    return True
 
 
 def checkbox_to_value(option, value_on=1, value_off=0):
@@ -259,7 +265,7 @@ def checkbox_to_value(option, value_on=1, value_off=0):
     if type(option) is list:
         option = option[-1]
 
-    if option == 'on' or option == 'true':
+    if 'on' == option or 'true' == option:
         return value_on
 
     return value_off
@@ -300,7 +306,7 @@ def clean_host(host, default_port=None):
 def clean_hosts(hosts, default_port=None):
     cleaned_hosts = []
 
-    for cur_host in [x.strip() for x in hosts.split(',')]:
+    for cur_host in [host.strip() for host in hosts.split(',')]:
         if cur_host:
             cleaned_host = clean_host(cur_host, default_port)
             if cleaned_host:
@@ -325,14 +331,14 @@ def clean_url(url, add_slash=True):
         if '://' not in url:
             url = '//' + url
 
-        scheme, netloc, path, query, fragment = urlparse.urlsplit(url, 'http')
+        scheme, netloc, path, query, fragment = urlsplit(url, 'http')
 
         if not path.endswith('/'):
             basename, ext = ek.ek(os.path.splitext, ek.ek(os.path.basename, path))
             if not ext and add_slash:
                 path += '/'
 
-        cleaned_url = urlparse.urlunsplit((scheme, netloc, path, query, fragment))
+        cleaned_url = urlunsplit((scheme, netloc, path, query, fragment))
 
     else:
         cleaned_url = ''
@@ -340,12 +346,25 @@ def clean_url(url, add_slash=True):
     return cleaned_url
 
 
+def kv_csv(data, default=''):
+    """
+    Returns a cleansed CSV string of key value pairs
+    Elements must have one '=' in order to be returned
+    Elements are stripped of leading/trailing whitespace but may contain whitespace (e.g. "tv shows")
+    """
+    if not isinstance(data, string_types):
+        return default
+
+    return ','.join(['='.join([i.strip() for i in i.split('=')]) for i in data.split(',')
+                     if 1 == len(re.findall('=', i)) and all(i.replace(' ', '').split('='))])
+
+
 def to_int(val, default=0):
     """ Return int value of val or default on error """
 
     try:
         val = int(val)
-    except:
+    except (BaseException, Exception):
         val = default
 
     return val
@@ -367,11 +386,11 @@ def minimax(val, default, low, high):
 def check_setting_int(config, cfg_name, item_name, def_val):
     try:
         my_val = int(config[cfg_name][item_name])
-    except:
+    except (BaseException, Exception):
         my_val = def_val
         try:
             config[cfg_name][item_name] = my_val
-        except:
+        except (BaseException, Exception):
             config[cfg_name] = {}
             config[cfg_name][item_name] = my_val
     logger.log('%s -> %s' % (item_name, my_val), logger.DEBUG)
@@ -381,11 +400,11 @@ def check_setting_int(config, cfg_name, item_name, def_val):
 def check_setting_float(config, cfg_name, item_name, def_val):
     try:
         my_val = float(config[cfg_name][item_name])
-    except:
+    except (BaseException, Exception):
         my_val = def_val
         try:
             config[cfg_name][item_name] = my_val
-        except:
+        except (BaseException, Exception):
             config[cfg_name] = {}
             config[cfg_name][item_name] = my_val
 
@@ -407,11 +426,11 @@ def check_setting_str(config, cfg_name, item_name, def_val, log=True):
 
     try:
         my_val = helpers.decrypt(config[cfg_name][item_name], encryption_version)
-    except:
+    except (BaseException, Exception):
         my_val = def_val
         try:
             config[cfg_name][item_name] = helpers.encrypt(my_val, encryption_version)
-        except:
+        except (BaseException, Exception):
             config[cfg_name] = {}
             config[cfg_name][item_name] = helpers.encrypt(my_val, encryption_version)
 
@@ -423,7 +442,7 @@ def check_setting_str(config, cfg_name, item_name, def_val, log=True):
     return (my_val, def_val)['None' == my_val]
 
 
-class ConfigMigrator():
+class ConfigMigrator(object):
     def __init__(self, config_obj):
         """
         Initializes a config migrator that can take the config from the version indicated in the config
@@ -449,7 +468,13 @@ class ConfigMigrator():
                                 12: 'Add "hevc" and some non-english languages to ignore words if not found',
                                 13: 'Change default dereferrer url to blank',
                                 14: 'Convert Trakt to multi-account',
-                                15: 'Transmithe.net rebranded Nebulance'}
+                                15: 'Transmithe.net rebranded Nebulance',
+                                16: 'Purge old cache image folders',
+                                17: 'Add "vp9", "av1" to ignore words if not found',
+                                18: 'Update "Spanish" ignore word',
+                                19: 'Change (mis)use of Anonymous redirect dereferer.org service to nullrefer.com',
+                                20: 'Change Growl',
+                                }
 
     def migrate_config(self):
         """ Calls each successive migration until the config is the same version as SG expects """
@@ -471,7 +496,7 @@ class ConfigMigrator():
                 migration_name = ''
 
             logger.log(u'Backing up config before upgrade')
-            if not helpers.backupVersionedFile(sickbeard.CONFIG_FILE, self.config_version):
+            if not helpers.backup_versioned_file(sickbeard.CONFIG_FILE, self.config_version):
                 logger.log_error_and_exit(u'Config backup failed, abort upgrading config')
             else:
                 logger.log(u'Proceeding with upgrade')
@@ -506,8 +531,8 @@ class ConfigMigrator():
         sickbeard.NAMING_MULTI_EP = int(check_setting_int(self.config_obj, 'General', 'naming_multi_ep_type', 1))
 
         # see if any of their shows used season folders
-        myDB = db.DBConnection()
-        season_folder_shows = myDB.select('SELECT * FROM tv_shows WHERE flatten_folders = 0')
+        my_db = db.DBConnection()
+        season_folder_shows = my_db.select('SELECT * FROM tv_shows WHERE flatten_folders = 0')
 
         # if any shows had season folders on then prepend season folder to the pattern
         if season_folder_shows:
@@ -533,7 +558,7 @@ class ConfigMigrator():
             logger.log(u'No shows were using season folders before so I am disabling flattening on all shows')
 
             # don't flatten any shows at all
-            myDB.action('UPDATE tv_shows SET flatten_folders = 0')
+            my_db.action('UPDATE tv_shows SET flatten_folders = 0 WHERE 1=1')
 
         sickbeard.NAMING_FORCE_FOLDERS = naming.check_force_season_folders()
 
@@ -549,11 +574,11 @@ class ConfigMigrator():
         use_ep_name = bool(check_setting_int(self.config_obj, 'General', 'naming_ep_name', 1))
 
         # make the presets into templates
-        naming_ep_type = ('%Sx%0E',
+        naming_ep_tmpl = ('%Sx%0E',
                           's%0Se%0E',
                           'S%0SE%0E',
                           '%0Sx%0E')
-        naming_sep_type = (' - ', ' ')
+        naming_sep_tmpl = (' - ', ' ')
 
         # set up our data to use
         if use_periods:
@@ -570,29 +595,29 @@ class ConfigMigrator():
         if abd:
             ep_string = abd_string
         else:
-            ep_string = naming_ep_type[ep_type]
+            ep_string = naming_ep_tmpl[ep_type]
 
-        finalName = ''
+        final_name = ''
 
         # start with the show name
         if use_show_name:
-            finalName += show_name + naming_sep_type[sep_type]
+            final_name += show_name + naming_sep_tmpl[sep_type]
 
         # add the season/ep stuff
-        finalName += ep_string
+        final_name += ep_string
 
         # add the episode name
         if use_ep_name:
-            finalName += naming_sep_type[sep_type] + ep_name
+            final_name += naming_sep_tmpl[sep_type] + ep_name
 
         # add the quality
         if use_quality:
-            finalName += naming_sep_type[sep_type] + ep_quality
+            final_name += naming_sep_tmpl[sep_type] + ep_quality
 
         if use_periods:
-            finalName = re.sub('\s+', '.', finalName)
+            final_name = re.sub(r'\s+', '.', final_name)
 
-        return finalName
+        return final_name
 
     # Migration v2: Dummy migration to sync backup number with config version number
     def _migrate_v2(self):
@@ -604,7 +629,8 @@ class ConfigMigrator():
         Reads in the old naming settings from your config and generates a new config template from them.
         """
         # get the old settings from the file and store them in the new variable names
-        for prov in [curProvider for curProvider in sickbeard.providers.sortedProviderList() if curProvider.name == 'omgwtfnzbs']:
+        for prov in [curProvider for curProvider in sickbeard.providers.sortedProviderList()
+                     if 'omgwtfnzbs' == curProvider.name]:
             prov.username = check_setting_str(self.config_obj, 'omgwtfnzbs', 'omgwtfnzbs_uid', '')
             prov.api_key = check_setting_str(self.config_obj, 'omgwtfnzbs', 'omgwtfnzbs_key', '')
 
@@ -626,13 +652,12 @@ class ConfigMigrator():
                                logger.ERROR)
                     continue
 
-                if name == 'Sick Beard Index':
+                if 'Sick Beard Index' == name:
                     key = '0'
 
-                if name == 'NZBs.org':
-                    cat_ids = '5030,5040,5060,5070,5090'
-                else:
-                    cat_ids = '5030,5040,5060'
+                cat_ids = '5030,5040,5060'
+                # if name == 'NZBs.org':
+                #     cat_ids = '5030,5040,5060,5070,5090'
 
                 cur_provider_data_list = [name, url, key, cat_ids, enabled]
                 new_newznab_data.append('|'.join(cur_provider_data_list))
@@ -677,10 +702,10 @@ class ConfigMigrator():
 
         use_banner = bool(check_setting_int(self.config_obj, 'General', 'use_banner', 0))
 
-        def _migrate_metadata(metadata, metadata_name, use_banner):
+        def _migrate_metadata(metadata, metadata_name, banner):
             cur_metadata = metadata.split('|')
             # if target has the old number of values, do upgrade
-            if len(cur_metadata) == 6:
+            if 6 == len(cur_metadata):
                 logger.log(u'Upgrading ' + metadata_name + ' metadata, old value: ' + metadata)
                 cur_metadata.insert(4, '0')
                 cur_metadata.append('0')
@@ -688,15 +713,15 @@ class ConfigMigrator():
                 cur_metadata.append('0')
                 # swap show fanart, show poster
                 cur_metadata[3], cur_metadata[2] = cur_metadata[2], cur_metadata[3]
-                # if user was using use_banner to override the poster,
+                # if user was using banner to override the poster,
                 # instead enable the banner option and deactivate poster
-                if metadata_name == 'XBMC' and use_banner:
+                if 'XBMC' == metadata_name and banner:
                     cur_metadata[4], cur_metadata[3] = cur_metadata[3], '0'
                 # write new format
                 metadata = '|'.join(cur_metadata)
                 logger.log(u'Upgrading %s metadata, new value: %s' % (metadata_name, metadata))
 
-            elif len(cur_metadata) == 10:
+            elif 10 == len(cur_metadata):
                 metadata = '|'.join(cur_metadata)
                 logger.log(u'Keeping %s metadata, value: %s' % (metadata_name, metadata))
             else:
@@ -738,7 +763,8 @@ class ConfigMigrator():
             check_setting_int(self.config_obj, 'GUI', 'coming_eps_display_paused', 0))
         sickbeard.EPISODE_VIEW_MISSED_RANGE = check_setting_int(self.config_obj, 'GUI', 'coming_eps_missed_range', 7)
 
-    def _migrate_v8(self):
+    @staticmethod
+    def _migrate_v8():
         # removing settings from gui and making it a hidden debug option
         sickbeard.RECENTSEARCH_STARTUP = False
 
@@ -746,7 +772,8 @@ class ConfigMigrator():
         sickbeard.PUSHBULLET_ACCESS_TOKEN = check_setting_str(self.config_obj, 'Pushbullet', 'pushbullet_api', '')
         sickbeard.PUSHBULLET_DEVICE_IDEN = check_setting_str(self.config_obj, 'Pushbullet', 'pushbullet_device', '')
 
-    def _migrate_v10(self):
+    @staticmethod
+    def _migrate_v10():
         # reset backlog frequency to default
         sickbeard.BACKLOG_FREQUENCY = sickbeard.DEFAULT_BACKLOG_FREQUENCY
 
@@ -756,9 +783,11 @@ class ConfigMigrator():
         else:
             sickbeard.SHOWLIST_TAGVIEW = 'default'
 
-    def _migrate_v12(self):
+    @staticmethod
+    def _migrate_v12():
         # add words to ignore list and insert spaces to improve the ui config readability
-        words_to_add = ['hevc', 'reenc', 'x265', 'danish', 'deutsch', 'flemish', 'italian', 'nordic', 'norwegian', 'portuguese', 'spanish', 'turkish']
+        words_to_add = ['hevc', 'reenc', 'x265', 'danish', 'deutsch', 'flemish', 'italian',
+                        'nordic', 'norwegian', 'portuguese', 'spanish', 'turkish']
         config_words = sickbeard.IGNORE_WORDS.split(',')
         new_list = []
         for new_word in words_to_add:
@@ -774,9 +803,10 @@ class ConfigMigrator():
 
         sickbeard.IGNORE_WORDS = ', '.join(sorted(new_list))
 
-    def _migrate_v13(self):
+    @staticmethod
+    def _migrate_v13():
         # change dereferrer.org urls to blank, but leave any other url untouched
-        if sickbeard.ANON_REDIRECT == 'http://dereferer.org/?':
+        if 'http://dereferer.org/?' == sickbeard.ANON_REDIRECT:
             sickbeard.ANON_REDIRECT = ''
 
     def _migrate_v14(self):
@@ -788,8 +818,8 @@ class ConfigMigrator():
     # Migration v15: Transmithe.net variables
     def _migrate_v15(self):
         try:
-            neb = filter(lambda p: 'Nebulance' in p.name, sickbeard.providers.sortedProviderList())[0]
-        except (StandardError, Exception):
+            neb = filter_list(lambda p: 'Nebulance' in p.name, sickbeard.providers.sortedProviderList())[0]
+        except (BaseException, Exception):
             return
         # get the old settings from the file and store them in the new variable names
         old_id = 'transmithe_net'
@@ -807,3 +837,66 @@ class ConfigMigrator():
         neb.search_fallback = bool(check_setting_int(self.config_obj, old_id_uc, old_id + '_search_fallback', 0))
         neb.seed_time = check_setting_int(self.config_obj, old_id_uc, old_id + '_seed_time', '')
         neb._seed_ratio = check_setting_str(self.config_obj, old_id_uc, old_id + '_seed_ratio', '')
+
+    # Migration v16: Purge old cache image folder name
+    @staticmethod
+    def _migrate_v16():
+        if sickbeard.CACHE_DIR and ek.ek(os.path.isdir, sickbeard.CACHE_DIR):
+            cache_default = sickbeard.CACHE_DIR
+            dead_paths = ['anidb', 'imdb', 'trakt']
+            for path in dead_paths:
+                sickbeard.CACHE_DIR = '%s/images/%s' % (cache_default, path)
+                helpers.clear_cache(True)
+                try:
+                    ek.ek(os.rmdir, sickbeard.CACHE_DIR)
+                except OSError:
+                    pass
+            sickbeard.CACHE_DIR = cache_default
+
+    @staticmethod
+    def add_ignore_words(wordlist, removelist=None):
+        # add words to ignore list and insert spaces to improve the ui config readability
+        if not isinstance(wordlist, list):
+            wordlist = [wordlist]
+        if not isinstance(removelist, list):
+            removelist = ([removelist], [])[None is removelist]
+
+        words = sickbeard.IGNORE_WORDS.split(',') + wordlist
+
+        new_list = []
+        dedupe = []
+        using_regex = ''
+        for ignore_word in words:
+            word = ignore_word.strip()
+            if word.startswith('regex:'):
+                word = word.lstrip('regex:').strip()
+                using_regex = 'regex:'
+            if word:
+                check_word = word.lower()
+                if check_word not in dedupe and check_word not in removelist:
+                    dedupe += [check_word]
+                    if 'spanish' in check_word:
+                        word = re.sub(r'(?i)(portuguese)\|spanish(\|swedish)', r'\1\2', word)
+                    new_list += [word]
+
+        sickbeard.IGNORE_WORDS = '%s%s' % (using_regex, ', '.join(new_list))
+
+    def _migrate_v17(self):
+
+        self.add_ignore_words(['vp9', 'av1'])
+
+    def _migrate_v18(self):
+
+        self.add_ignore_words([r'regex:^(?=.*?\bspanish\b)((?!spanish.?princess).)*$'], ['spanish'])
+
+    @staticmethod
+    def _migrate_v19():
+        # change misuse of dereferrer.org to the nullrefer.com service, but leave any other url untouched
+        if re.search(r'https?://dereferer.org', sickbeard.ANON_REDIRECT):
+            sickbeard.ANON_REDIRECT = 'https://nullrefer.com/?'
+
+    def _migrate_v20(self):
+        GROWL_HOST = check_setting_str(self.config_obj, 'Growl', 'growl_host', '')
+        GROWL_PASSWORD = check_setting_str(self.config_obj, 'Growl', 'growl_password', '')
+        if GROWL_PASSWORD:
+            sickbeard.GROWL_HOST = '%s@%s' % (GROWL_PASSWORD, GROWL_HOST)

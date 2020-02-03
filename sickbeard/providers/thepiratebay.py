@@ -15,33 +15,41 @@
 # You should have received a copy of the GNU General Public License
 # along with SickGear.  If not, see <http://www.gnu.org/licenses/>.
 
-from __future__ import with_statement
+from __future__ import with_statement, division
 
 import os
 import re
 import traceback
-import urllib
 
 from . import generic
-from sickbeard import config, logger, show_name_helpers
-from sickbeard.bs4_parser import BS4Parser
-from sickbeard.common import Quality, mediaExtensions
-from sickbeard.helpers import tryInt
-from sickbeard.name_parser.parser import NameParser, InvalidNameException, InvalidShowException
-from lib.unidecode import unidecode
+from .. import logger, show_name_helpers
+from ..common import mediaExtensions, Quality
+from ..helpers import try_int
+from ..name_parser.parser import InvalidNameException, InvalidShowException, NameParser
+from bs4_parser import BS4Parser
+
+from _23 import b64decodestring, filter_list, quote, unidecode
+from six import iteritems
 
 
 class ThePirateBayProvider(generic.TorrentProvider):
 
     def __init__(self):
-        generic.TorrentProvider.__init__(self, 'The Pirate Bay', cache_update_freq=20)
+        generic.TorrentProvider.__init__(self, 'The Pirate Bay')
 
-        self.url_home = ['https://thepiratebay.%s/' % u for u in 'se', 'org'] + \
-                        ['https://piratebay.usbypass.club/', 'https://tpb.run/']
+        self.url_home = ['https://thepiratebay.se/'] + \
+                        ['https://%s/' % b64decodestring(x) for x in [''.join(x) for x in [
+                            [re.sub(r'[h\sI]+', '', x[::-1]) for x in [
+                                'm IY', '5  F', 'HhIc', 'vI J', 'HIhe', 'uI k', '2  d', 'uh l']],
+                            [re.sub(r'[N\sQ]+', '', x[::-1]) for x in [
+                                'lN Gc', 'X  Yy', 'c lNR', 'vNJNH', 'kQNHe', 'GQdQu', 'wNN9']],
+                        ]]]
 
-        self.url_vars = {'search': 'search/%s/0/7/200', 'browse': 'tv/latest/'}
-        self.url_tmpl = {'config_provider_home_uri': '%(home)s', 'search': '%(home)s%(vars)s',
-                         'browse': '%(home)s%(vars)s'}
+        self.url_vars = {'search': 'search/%s/0/7/200', 'browse': 'tv/latest/',
+                         'search2': 'search.php?q=%s&video=on&category=0&page=0&orderby=99', 'browse2': '?load=/recent'}
+        self.url_tmpl = {'config_provider_home_uri': '%(home)s',
+                         'search': '%(home)s%(vars)s', 'search2': '%(home)s%(vars)s',
+                         'browse': '%(home)s%(vars)s', 'browse2': '%(home)s%(vars)s'}
 
         self.proper_search_terms = None
 
@@ -61,7 +69,7 @@ class ThePirateBayProvider(generic.TorrentProvider):
         quality = Quality.UNKNOWN
         file_name = None
         data = self.get_url('%sajax_details_filelist.php?id=%s' % (self.url, torrent_id))
-        if not data:
+        if self.should_skip() or not data:
             return None
 
         files_list = re.findall('<td.+>(.*?)</td>', data)
@@ -69,7 +77,7 @@ class ThePirateBayProvider(generic.TorrentProvider):
         if not files_list:
             logger.log(u'Unable to get the torrent file list for ' + title, logger.ERROR)
 
-        video_files = filter(lambda x: x.rpartition('.')[2].lower() in mediaExtensions, files_list)
+        video_files = filter_list(lambda x: x.rpartition('.')[2].lower() in mediaExtensions, files_list)
 
         # Filtering SingleEpisode/MultiSeason Torrent
         if ep_number > len(video_files) or float(ep_number * 1.1) < len(video_files):
@@ -95,7 +103,7 @@ class ThePirateBayProvider(generic.TorrentProvider):
             return None
 
         try:
-            my_parser = NameParser(showObj=self.show)
+            my_parser = NameParser(show_obj=self.show_obj, indexer_lookup=False)
             parse_result = my_parser.parse(file_name)
         except (InvalidNameException, InvalidShowException):
             return None
@@ -111,23 +119,22 @@ class ThePirateBayProvider(generic.TorrentProvider):
 
     def _season_strings(self, ep_obj, **kwargs):
 
-        if ep_obj.show.air_by_date or ep_obj.show.sports:
+        if ep_obj.show_obj.air_by_date or ep_obj.show_obj.sports:
             airdate = str(ep_obj.airdate).split('-')[0]
             ep_detail = [airdate, 'Season ' + airdate]
-        elif ep_obj.show.anime:
+        elif ep_obj.show_obj.anime:
             ep_detail = '%02i' % ep_obj.scene_absolute_number
         else:
-            season = (ep_obj.season, ep_obj.scene_season)[bool(ep_obj.show.is_scene)]
+            season = (ep_obj.season, ep_obj.scene_season)[bool(ep_obj.show_obj.is_scene)]
             ep_detail = ['S%02d' % int(season), 'Season %s -Ep*' % season]
 
         return [{'Season': self._build_search_strings(ep_detail)}]
 
     def _episode_strings(self, ep_obj, **kwargs):
 
-        return generic.TorrentProvider._episode_strings(self, ep_obj, date_or=True,
-                                                        ep_detail=lambda x: '%s|%s' % (config.naming_ep_type[2] % x,
-                                                                                       config.naming_ep_type[0] % x),
-                                                        ep_detail_anime=lambda x: '%02i' % x, **kwargs)
+        return super(ThePirateBayProvider, self)._episode_strings(
+            ep_obj, date_or=True,
+            ep_detail_anime=lambda x: '%02i' % x, **kwargs)
 
     def _search_provider(self, search_params, search_mode='eponly', epcount=0, **kwargs):
 
@@ -137,39 +144,49 @@ class ThePirateBayProvider(generic.TorrentProvider):
 
         items = {'Cache': [], 'Season': [], 'Episode': [], 'Propers': []}
 
-        rc = dict((k, re.compile('(?i)' + v)) for (k, v) in {
+        rc = dict([(k, re.compile('(?i)' + v)) for (k, v) in iteritems({
             'info': 'detail', 'get': 'download[^"]+magnet', 'tid': r'.*/(\d{5,}).*',
-            'verify': '(?:helper|moderator|trusted|vip)', 'size': 'size[^\d]+(\d+(?:[.,]\d+)?\W*[bkmgt]\w+)'}.items())
+            'verify': '(?:helper|moderator|trusted|vip)', 'size': r'size[^\d]+(\d+(?:[.,]\d+)?\W*[bkmgt]\w+)'})])
 
-        for mode in search_params.keys():
+        for mode in search_params:
             for search_string in search_params[mode]:
-                search_string = isinstance(search_string, unicode) and unidecode(search_string) or search_string
+                search_string = unidecode(search_string)
 
-                search_url = self.urls['browse'] if 'Cache' == mode \
-                    else self.urls['search'] % (urllib.quote(search_string))
-                html = self.get_url(search_url)
+                s_mode = 'browse' if 'Cache' == mode else 'search'
+                for i in ('', '2'):
+                    search_url = self.urls['%s%s' % (s_mode, i)]
+                    if 'Cache' != mode:
+                        search_url = search_url % quote(search_string)
 
+                    html = self.get_url(search_url)
+                    if self.should_skip():
+                        return results
+
+                    if html and not self._has_no_results(html):
+                        break
+                        
                 cnt = len(items[mode])
                 try:
                     if not html or self._has_no_results(html):
+                        self._url = None
                         raise generic.HaltParseException
 
-                    with BS4Parser(html, features=['html5lib', 'permissive'], attr='id="searchResult"') as soup:
-                        torrent_table = soup.find(id='searchResult')
-                        torrent_rows = [] if not torrent_table else torrent_table.find_all('tr')
+                    with BS4Parser(html, parse_only=dict(table={'id': 'searchResult'})) as tbl:
+                        tbl_rows = [] if not tbl else tbl.find_all('tr')
 
-                        if 2 > len(torrent_rows):
+                        if 2 > len(tbl_rows):
                             raise generic.HaltParseException
 
                         head = None
-                        for tr in torrent_table.find_all('tr')[1:]:
+                        for tr in tbl.find_all('tr')[1:]:
                             cells = tr.find_all('td')
                             if 3 > len(cells):
                                 continue
                             try:
                                 head = head if None is not head else self._header_row(tr)
-                                seeders, leechers = [tryInt(cells[head[x]].get_text().strip()) for x in 'seed', 'leech']
-                                if self._peers_fail(mode, seeders, leechers):
+                                seeders, leechers = [try_int(cells[head[x]].get_text().strip())
+                                                     for x in ('seed', 'leech')]
+                                if self._reject_item(seeders, leechers):
                                     continue
 
                                 info = tr.find('a', title=rc['info'])
@@ -186,21 +203,22 @@ class ThePirateBayProvider(generic.TorrentProvider):
                             # Check number video files = episode in season and
                             # find the real Quality for full season torrent analyzing files in torrent
                             if 'Season' == mode and 'sponly' == search_mode:
-                                ep_number = int(epcount / len(set(show_name_helpers.allPossibleShowNames(self.show))))
+                                ep_number = int(epcount // len(set(show_name_helpers.allPossibleShowNames(
+                                    self.show_obj))))
                                 title = self._find_season_quality(title, tid, ep_number)
 
                             if title and download_magnet:
                                 size = None
                                 try:
                                     size = rc['size'].findall(tr.find_all(class_='detDesc')[0].get_text())[0]
-                                except (StandardError, Exception):
+                                except (BaseException, Exception):
                                     pass
 
                                 items[mode].append((title, download_magnet, seeders, self._bytesizer(size)))
 
                 except generic.HaltParseException:
                     pass
-                except (StandardError, Exception):
+                except (BaseException, Exception):
                     logger.log(u'Failed to parse. Traceback: %s' % traceback.format_exc(), logger.ERROR)
                 self._log_search(mode, len(items[mode]) - cnt, search_url)
 

@@ -15,13 +15,15 @@
 # along with SickGear.  If not, see <http://www.gnu.org/licenses/>.
 
 import re
-import traceback
-import urllib
+import time
 
 from . import generic
-from sickbeard import logger, show_name_helpers, tvcache
-from sickbeard.helpers import tryInt
-from sickbeard.bs4_parser import BS4Parser
+from .. import show_name_helpers, tvcache
+from ..helpers import try_int
+from bs4_parser import BS4Parser
+
+from _23 import filter_list, map_list, urlencode
+from six import iteritems
 
 
 class TokyoToshokanProvider(generic.TorrentProvider):
@@ -33,63 +35,73 @@ class TokyoToshokanProvider(generic.TorrentProvider):
 
         self.cache = TokyoToshokanCache(self)
 
-    def _search_provider(self, search_string, search_mode='eponly', **kwargs):
+    def _search_provider(self, search_params, **kwargs):
 
         results = []
-        if self.show and not self.show.is_anime:
+        if self.show_obj and not self.show_obj.is_anime:
             return results
 
-        params = urllib.urlencode({'terms': search_string.encode('utf-8'),
-                                   'type': 1})  # get anime types
+        items = {'Season': [], 'Episode': [], 'Propers': []}
 
-        search_url = '%ssearch.php?%s' % (self.url, params)
-        mode = ('Episode', 'Season')['sponly' == search_mode]
+        rc = dict([(k, re.compile('(?i)' + v)) for (k, v) in iteritems({
+            'nodots': r'[\.\s]+', 'stats': r'S:\s*?(\d)+\s*L:\s*(\d+)',
+            'size': r'size:\s*(\d+[.,]\d+\w+)'})])
 
-        rc = dict((k, re.compile('(?i)' + v)) for (k, v) in {
-            'stats': 'S:\s*?(\d)+\s*L:\s*(\d+)', 'size': 'size:\s*(\d+[.,]\d+\w+)'}.iteritems())
+        for mode in search_params:
+            for search_string in search_params[mode]:
+                params = urlencode({'terms': rc['nodots'].sub(' ', search_string).encode('utf-8'), 'type': 1})
 
-        html = self.get_url(search_url)
-        if html:
-            try:
-                with BS4Parser(html, features=['html5lib', 'permissive']) as soup:
-                    torrent_table = soup.find('table', class_='listing')
-                    torrent_rows = [] if not torrent_table else torrent_table.find_all('tr')
-                    if torrent_rows:
-                        a = (0, 1)[None is not torrent_rows[0].find('td', class_='centertext')]
+                search_url = '%ssearch.php?%s' % (self.url, params)
 
-                        for top, bottom in zip(torrent_rows[a::2], torrent_rows[a+1::2]):
-                            try:
-                                bottom_text = bottom.get_text() or ''
-                                stats = rc['stats'].findall(bottom_text)
-                                seeders, leechers = (0, 0) if not stats else [tryInt(n) for n in stats[0]]
+                html = self.get_url(search_url)
+                if self.should_skip():
+                    return self._sort_seeding(mode, results)
 
-                                size = rc['size'].findall(bottom_text)
-                                size = size and size[0] or -1
+                cnt = len(items[mode])
+                try:
+                    if not html or self._has_no_results(html):
+                        raise generic.HaltParseException
 
-                                info = top.find('td', class_='desc-top')
-                                title = info and re.sub(r'[ .]{2,}', '.', info.get_text().strip())
-                                urls = info and sorted([x.get('href') for x in info.find_all('a') or []])
-                                download_url = urls and urls[0].startswith('http') and urls[0] or urls[1]
-                            except (AttributeError, TypeError, ValueError, IndexError):
-                                continue
+                    with BS4Parser(html, parse_only=dict(table={'class': (lambda at: at and 'listing' in at)})) as tbl:
+                        tbl_rows = [] if not tbl else tbl.find_all('tr')
+                        if tbl_rows:
+                            a = (0, 1)[None is not tbl_rows[0].find('td', class_='centertext')]
 
-                            if title and download_url:
-                                results.append((title, download_url, seeders, self._bytesizer(size)))
+                            for top, bottom in zip(tbl_rows[a::2], tbl_rows[a+1::2]):
+                                try:
+                                    bottom_text = bottom.get_text() or ''
+                                    stats = rc['stats'].findall(bottom_text)
+                                    seeders, leechers = (0, 0) if not stats else [try_int(n) for n in stats[0]]
 
-            except (StandardError, Exception):
-                logger.log(u'Failed to parse. Traceback: %s' % traceback.format_exc(), logger.ERROR)
+                                    size = rc['size'].findall(bottom_text)
+                                    size = size and size[0] or -1
 
-        self._log_search(mode, len(results), search_url)
+                                    info = top.find('td', class_='desc-top')
+                                    title = info and re.sub(r'[ .]{2,}', '.', info.get_text().strip())
+                                    links = info and map_list(lambda l: l.get('href', ''), info.find_all('a')) or None
+                                    download_url = self._link(
+                                        (filter_list(lambda l: 'magnet:' in l, links)
+                                         or filter_list(lambda l: not re.search(r'(magnet:|\.se).+', l), links))[0])
+                                except (AttributeError, TypeError, ValueError, IndexError):
+                                    continue
 
-        return self._sort_seeding(mode, results)
+                                if title and download_url:
+                                    items[mode].append((title, download_url, seeders, self._bytesizer(size)))
 
-    def _season_strings(self, ep_obj, **kwargs):
+                except (BaseException, Exception):
+                    time.sleep(1.1)
 
-        return [x.replace('.', ' ') for x in show_name_helpers.makeSceneSeasonSearchString(self.show, ep_obj)]
+                self._log_search(mode, len(items[mode]) - cnt, search_url)
 
-    def _episode_strings(self, ep_obj, **kwargs):
+            results = self._sort_seeding(mode, results + items[mode])
 
-        return [x.replace('.', ' ') for x in show_name_helpers.makeSceneSearchString(self.show, ep_obj)]
+        return results
+
+    def _season_strings(self, *args, **kwargs):
+        return [{'Season': show_name_helpers.makeSceneSeasonSearchString(self.show_obj, *args)}]
+
+    def _episode_strings(self, *args, **kwargs):
+        return [{'Episode': show_name_helpers.makeSceneSearchString(self.show_obj, *args)}]
 
 
 class TokyoToshokanCache(tvcache.TVCache):
@@ -99,16 +111,16 @@ class TokyoToshokanCache(tvcache.TVCache):
 
         self.update_freq = 15
 
-    def _cache_data(self):
+    def _cache_data(self, **kwargs):
 
         mode = 'Cache'
-        search_url = '%srss.php?%s' % (self.provider.url, urllib.urlencode({'filter': '1'}))
-        data = self.getRSSFeed(search_url)
+        search_url = '%srss.php?%s' % (self.provider.url, urlencode({'filter': '1'}))
+        data = self.get_rss(search_url)
 
         results = []
         if data and 'entries' in data:
 
-            rc = dict((k, re.compile('(?i)' + v)) for (k, v) in {'size': 'size:\s*(\d+[.,]\d+\w+)'}.iteritems())
+            rc = dict([(k, re.compile('(?i)' + v)) for (k, v) in iteritems({'size': r'size:\s*(\d+[.,]\d+\w+)'})])
 
             for cur_item in data.get('entries', []):
                 try:

@@ -22,15 +22,17 @@ import threading
 import sickbeard
 
 
-class ProperSearcher:
+class ProperSearcher(object):
     def __init__(self):
         self.lock = threading.Lock()
         self.amActive = False
-        self.search_intervals = [('daily', '24 hours', 24 * 60), ('4h', '4 hours', 4 * 60),
-                                 ('90m', '90 mins', 90), ('45m', '45 mins', 45), ('15m', '15 mins', 15)]
+
+    @staticmethod
+    def is_enabled():
+        # type: (...) -> bool
+        return sickbeard.DOWNLOAD_PROPERS
 
     def run(self):
-
         self.amActive = True
 
         propersearch_queue_item = sickbeard.search_queue.ProperSearchQueueItem()

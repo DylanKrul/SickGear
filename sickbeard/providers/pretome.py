@@ -16,14 +16,14 @@
 # along with SickGear.  If not, see <http://www.gnu.org/licenses/>.
 
 from . import generic
-from sickbeard.rssfeeds import RSSFeeds
-from lib.unidecode import unidecode
+
+from _23 import unidecode
 
 
 class PreToMeProvider(generic.TorrentProvider):
 
     def __init__(self):
-        generic.TorrentProvider.__init__(self, 'PreToMe', cache_update_freq=6)
+        generic.TorrentProvider.__init__(self, 'PreToMe')
 
         self.url_base = 'https://pretome.info/'
 
@@ -47,12 +47,12 @@ class PreToMeProvider(generic.TorrentProvider):
         items = {'Cache': [], 'Season': [], 'Episode': [], 'Propers': []}
 
         url = self.urls['browse'] % self.passkey
-        for mode in search_params.keys():
+        for mode in search_params:
             for search_string in search_params[mode]:
-                search_string = isinstance(search_string, unicode) and unidecode(search_string) or search_string
+                search_string = unidecode(search_string)
                 search_url = url + (self.urls['search'] % search_string, '')['Cache' == mode]
 
-                xml_data = RSSFeeds(self).get_feed(search_url)
+                xml_data = self.cache.get_rss(search_url)
 
                 cnt = len(items[mode])
                 if xml_data and 'entries' in xml_data:

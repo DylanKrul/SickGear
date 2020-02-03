@@ -21,26 +21,27 @@ import re
 import traceback
 
 from . import generic
-from sickbeard import logger
-from sickbeard.bs4_parser import BS4Parser
-from sickbeard.helpers import tryInt
-from lib.unidecode import unidecode
+from .. import logger
+from ..helpers import try_int
+from bs4_parser import BS4Parser
+
+from _23 import unidecode
+from six import iteritems
 
 
 class AlphaRatioProvider(generic.TorrentProvider):
 
     def __init__(self):
 
-        generic.TorrentProvider.__init__(self, 'AlphaRatio', cache_update_freq=20)
+        generic.TorrentProvider.__init__(self, 'AlphaRatio', cache_update_freq=15)
 
         self.url_base = 'https://alpharatio.cc/'
         self.urls = {'config_provider_home_uri': self.url_base,
                      'login_action': self.url_base + 'login.php',
                      'search': self.url_base + 'torrents.php?searchstr=%s%s&' + '&'.join(
                          ['tags_type=1', 'order_by=time', 'order_way=desc'] +
-                         ['filter_cat[%s]=1' % c for c in 1, 2, 3, 4, 5] +
-                         ['action=basic', 'searchsubmit=1']),
-                     'get': self.url_base + '%s'}
+                         ['filter_cat[%s]=1' % c for c in (1, 2, 3, 4, 5)] +
+                         ['action=basic', 'searchsubmit=1'])}
 
         self.url = self.urls['config_provider_home_uri']
 
@@ -59,36 +60,40 @@ class AlphaRatioProvider(generic.TorrentProvider):
 
         items = {'Cache': [], 'Season': [], 'Episode': [], 'Propers': []}
 
-        rc = dict((k, re.compile('(?i)' + v)) for (k, v) in {'info': 'view', 'get': 'download'}.items())
-        for mode in search_params.keys():
+        rc = dict([(k, re.compile('(?i)' + v)) for (k, v) in iteritems({'info': 'view', 'get': 'download'})])
+        for mode in search_params:
             for search_string in search_params[mode]:
-                search_string = isinstance(search_string, unicode) and unidecode(search_string) or search_string
+                search_string = unidecode(search_string)
                 search_url = self.urls['search'] % (search_string, ('&freetorrent=1', '')[not self.freeleech])
 
                 html = self.get_url(search_url)
+                if self.should_skip():
+                    return results
 
                 cnt = len(items[mode])
                 try:
                     if not html or self._has_no_results(html):
                         raise generic.HaltParseException
 
-                    with BS4Parser(html, features=['html5lib', 'permissive']) as soup:
-                        torrent_table = soup.find(id='torrent_table')
-                        torrent_rows = [] if not torrent_table else torrent_table.find_all('tr')
+                    with BS4Parser(html, parse_only=dict(table={'id': 'torrent_table'})) as tbl:
+                        tbl_rows = [] if not tbl else tbl.find_all('tr')
 
-                        if 2 > len(torrent_rows):
+                        if 2 > len(tbl_rows):
                             raise generic.HaltParseException
 
                         head = None
-                        for tr in torrent_rows[1:]:
+                        for tr in tbl_rows[1:]:
                             cells = tr.find_all('td')
                             if 5 > len(cells):
                                 continue
                             try:
                                 head = head if None is not head else self._header_row(tr)
-                                seeders, leechers, size = [tryInt(n, n) for n in [
-                                    cells[head[x]].get_text().strip() for x in 'seed', 'leech', 'size']]
-                                if self._peers_fail(mode, seeders, leechers):
+                                seeders, leechers, size = [try_int(n, n) for n in [
+                                    cells[head[x]].get_text().strip() for x in ('seed', 'leech', 'size')]]
+                                if self._reject_item(seeders, leechers, self.freeleech and (
+                                        any([not tr.select('.tl_free'),
+                                             tr.select('.tl_timed'), tr.select('[title^="Timed Free"]'),
+                                             tr.select('.tl_expired'), tr.select('[title^="Expired Free"]')]))):
                                     continue
 
                                 title = tr.find('a', title=rc['info']).get_text().strip()
@@ -101,7 +106,7 @@ class AlphaRatioProvider(generic.TorrentProvider):
 
                 except generic.HaltParseException:
                     pass
-                except (StandardError, Exception):
+                except (BaseException, Exception):
                     logger.log(u'Failed to parse. Traceback: %s' % traceback.format_exc(), logger.ERROR)
                 self._log_search(mode, len(items[mode]) - cnt, search_url)
 

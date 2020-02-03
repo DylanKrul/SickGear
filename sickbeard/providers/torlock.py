@@ -17,13 +17,14 @@
 
 import re
 import traceback
-import urllib
 
 from . import generic
-from sickbeard import logger
-from sickbeard.bs4_parser import BS4Parser
-from sickbeard.helpers import tryInt
-from lib.unidecode import unidecode
+from .. import logger
+from ..helpers import try_int
+from bs4_parser import BS4Parser
+
+from _23 import b64decodestring, quote_plus, unidecode
+from six import iteritems
 
 
 class TorLockProvider(generic.TorrentProvider):
@@ -31,7 +32,13 @@ class TorLockProvider(generic.TorrentProvider):
     def __init__(self):
         generic.TorrentProvider.__init__(self, 'TorLock')
 
-        self.url_home = ['https://www.torlock.com/']
+        self.url_home = ['https://www.torlock.com/'] + \
+                        ['https://%s/' % b64decodestring(x) for x in [''.join(x) for x in [
+                            [re.sub(r'[g\sF]+', '', x[::-1]) for x in [
+                                'y9FFGd', 'j9FgGb', '15 Fya', 'sF Jmb', 'rN 2Fb', 'uQW FZ', '0Vmg Y']],
+                            [re.sub(r'[O\si]+', '', x[::-1]) for x in [
+                                'byO9Gid', 'y aji9G', '02O bj1', 'vJ Hicu', 'cz 5OCe', 'QZij FG', '=  =']],
+                        ]]]
 
         self.url_vars = {'search': 'television/torrents/%s.html?sort=added&order=desc',
                          'browse': 'television/1/added/desc.html', 'get': 'tor/%s.torrent'}
@@ -53,53 +60,54 @@ class TorLockProvider(generic.TorrentProvider):
 
         items = {'Cache': [], 'Season': [], 'Episode': [], 'Propers': []}
 
-        rc = dict((k, re.compile('(?i)' + v)) for (k, v) in {
-            'info': 'torrent.?(\d+)', 'versrc': r'ver\.', 'verified': 'Verified'}.iteritems())
+        rc = dict([(k, re.compile('(?i)' + v)) for (k, v) in iteritems({
+            'info': r'torrent.?(\d+)', 'versrc': r'ver\.', 'verified': 'Verified'})])
 
-        for mode in search_params.keys():
+        for mode in search_params:
             for search_string in search_params[mode]:
 
-                search_string = isinstance(search_string, unicode) and unidecode(search_string) or search_string
+                search_string = unidecode(search_string)
 
                 search_url = self.urls['browse'] if 'Cache' == mode \
-                    else self.urls['search'] % (urllib.quote_plus(search_string).replace('+', '-'))
+                    else self.urls['search'] % (quote_plus(search_string).replace('+', '-'))
 
                 html = self.get_url(search_url)
+                if self.should_skip():
+                    return results
 
                 cnt = len(items[mode])
                 try:
                     if not html or self._has_no_results(html):
                         raise generic.HaltParseException
-                    with BS4Parser(html, features=['html5lib', 'permissive']) as soup:
+                    with BS4Parser(html.replace('thead', 'tr')) as soup:
 
-                        torrent_table = soup.find(
+                        tbl = soup.find(
                             'div', class_=('panel panel-default', 'table-responsive')['Cache' == mode])
-                        if None is torrent_table:
+                        if None is tbl:
                             raise generic.HaltParseException
-                        torrent_table = torrent_table.find(
+                        tbl = tbl.find(
                             'table', class_='table table-striped table-bordered table-hover table-condensed')
-                        torrent_rows = [] if not torrent_table else torrent_table.find_all('tr')
+                        tbl_rows = [] if not tbl else tbl.find_all('tr')
 
-                        if 2 > len(torrent_rows):
+                        if 2 > len(tbl_rows):
                             raise generic.HaltParseException
 
                         head = None
-                        for tr in torrent_rows[1:]:
+                        for tr in tbl_rows[1:]:
                             cells = tr.find_all('td')
                             if 5 > len(cells):
                                 continue
                             try:
                                 head = head if None is not head else self._header_row(tr)
-                                seeders, leechers, size = [tryInt(n, n) for n in [
-                                    cells[head[x]].get_text().strip() for x in 'seed', 'leech', 'size']]
-                                if self._peers_fail(mode, seeders, leechers) \
-                                        or self.confirmed and not (tr.find('img', src=rc['versrc'])
-                                                                   or tr.find('img', title=rc['verified'])):
+                                seeders, leechers, size = [try_int(n, n) for n in [
+                                    cells[head[x]].get_text().strip() for x in ('seed', 'leech', 'size')]]
+                                if self._reject_item(seeders, leechers, verified=self.confirmed and not (
+                                        tr.find('img', src=rc['versrc']) or tr.find('img', title=rc['verified']))):
                                     continue
 
                                 info = tr.find('a', href=rc['info']) or {}
                                 title = info and info.get_text().strip()
-                                tid_href = info and tryInt(rc['info'].findall(info['href'])[0])
+                                tid_href = info and try_int(rc['info'].findall(info['href'])[0])
                                 download_url = tid_href and self._link(tid_href)
                             except (AttributeError, TypeError, ValueError, IndexError):
                                 continue
@@ -109,7 +117,7 @@ class TorLockProvider(generic.TorrentProvider):
 
                 except generic.HaltParseException:
                     pass
-                except (StandardError, Exception):
+                except (BaseException, Exception):
                     logger.log(u'Failed to parse. Traceback: %s' % traceback.format_exc(), logger.ERROR)
 
                 self._log_search(mode, len(items[mode]) - cnt, search_url)

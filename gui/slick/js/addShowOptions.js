@@ -1,16 +1,16 @@
-$(document).ready(function(){
+$(function(){
 
 	$('#saveDefaultsButton').click(function() {
 		var anyQualArray = [], bestQualArray = [];
 
-		$('#anyQualities option:selected').each(function(i, d) {
+		$('#wanted-qualities option:selected').each(function(i, d) {
 			anyQualArray.push($(d).val());
 		});
-		$('#bestQualities option:selected').each(function(i, d) {
+		$('#upgrade-qualities option:selected').each(function(i, d) {
 			bestQualArray.push($(d).val());
 		});
 
-		$.get(sbRoot + '/config/general/saveAddShowDefaults', {
+		$.get(sbRoot + '/config/general/save-add-show-defaults', {
 			default_status: $('#statusSelect').val(),
 			any_qualities: anyQualArray.join(','),
 			best_qualities: bestQualArray.join(','),
@@ -32,9 +32,31 @@ $(document).ready(function(){
 		$(this).attr('disabled', true);
 	});
 
-	$('#statusSelect, #qualityPreset, #anyQualities, #bestQualities, #wanted_begin, #wanted_latest,'
+	$('#statusSelect, #quality-preset, #wanted-qualities, #upgrade-qualities, #wanted_begin, #wanted_latest,'
 		+ ' #flatten_folders, #scene, #subtitles, #anime, #tag').change(function() {
 		$('#saveDefaultsButton').attr('disabled', false);
+	});
+
+	var updateOptions = function(that$, oldlink, newlink){
+		that$.html(that$.html().replace(oldlink, newlink));
+		if (!(/undefined/i.test(typeof $.SickGear.myform))){
+			$.SickGear.myform.loadsection(2);
+		}
+	};
+	$('#moreless-options-addshow').on('click', function(e){
+		e.stopPropagation();
+		e.preventDefault();
+		var that$ = $(this), el$ = $('#options-addshow');
+		if ('none' === el$.css('display')){
+			el$.fadeIn('fast', 'linear', function(){
+				updateOptions(that$, 'More', 'Less');
+			});
+		} else {
+			el$.fadeOut('fast', 'linear', function(){
+				updateOptions(that$, 'Less', 'More');
+			});
+		}
+		return !1;
 	});
 
 });

@@ -15,22 +15,28 @@
 # You should have received a copy of the GNU General Public License
 # along with SickGear.  If not, see <http://www.gnu.org/licenses/>.
 
-import math
-import re
-import time
-
-from . import generic
-from sickbeard import helpers, logger, scene_exceptions, tvcache
-from sickbeard.bs4_parser import BS4Parser
-from sickbeard.exceptions import AuthException
-from sickbeard.helpers import tryInt
-from lib.unidecode import unidecode
+from __future__ import division
 
 try:
     import json
 except ImportError:
     from lib import simplejson as json
+import math
 import random
+import re
+import time
+import traceback
+
+from . import generic
+from .. import logger, tvcache
+from ..helpers import try_int
+from ..indexers.indexer_config import TVINFO_TVDB
+from ..show_name_helpers import get_show_names
+from bs4_parser import BS4Parser
+from exceptions_helper import AuthException
+
+from _23 import unidecode
+from six import iteritems
 
 
 class BTNProvider(generic.TorrentProvider):
@@ -42,7 +48,7 @@ class BTNProvider(generic.TorrentProvider):
         self.url_api = 'https://api.broadcasthe.net'
 
         self.urls = {'config_provider_home_uri': self.url_base, 'login': self.url_base + 'login.php',
-                     'search': self.url_base + 'torrents.php?searchstr=%s&action=basic&%s', 'get': self.url_base + '%s'}
+                     'search': self.url_base + 'torrents.php?searchstr=%s&action=basic&%s'}
 
         self.proper_search_terms = ['%.proper.%', '%.repack.%']
 
@@ -55,6 +61,7 @@ class BTNProvider(generic.TorrentProvider):
         self.ua = self.session.headers['User-Agent']
         self.reject_m2ts = False
         self.cache = BTNCache(self)
+        self.has_limit = True
 
     def _authorised(self, **kwargs):
 
@@ -66,6 +73,15 @@ class BTNProvider(generic.TorrentProvider):
             raise AuthException('Must set Api key or Username/Password for %s in config provider options' % self.name)
         return True
 
+    def _check_response(self, data, url, post_data=None, post_json=None):
+        if not self.should_skip(log_warning=False):
+            if data and 'Call Limit' in data:
+                self.tmr_limit_update('1', 'h', '150/hr %s' % data)
+                self.log_failure_url(url, post_data, post_json)
+            else:
+                logger.log(u'Action prematurely ended. %(prov)s server error response = %(desc)s' %
+                           {'prov': self.name, 'desc': data}, logger.WARNING)
+
     def _search_provider(self, search_params, age=0, **kwargs):
 
         self._authorised()
@@ -74,7 +90,7 @@ class BTNProvider(generic.TorrentProvider):
         results = []
         api_up = True
 
-        for mode in search_params.keys():
+        for mode in search_params:
             for search_param in search_params[mode]:
 
                 params = {}
@@ -91,22 +107,20 @@ class BTNProvider(generic.TorrentProvider):
                             (''.join(random.sample('abcdefghijklmnopqrstuvwxyz0123456789', 8)),
                              self.api_key, json.dumps(param_dct), items_per_page, offset))
 
+                response, error_text = None, None
                 try:
-                    response = None
                     if api_up and self.api_key:
                         self.session.headers['Content-Type'] = 'application/json-rpc'
-                        response = helpers.getURL(
-                            self.url_api, post_data=json_rpc(params), session=self.session, json=True)
-                    if not response:
-                        api_up = False
-                        results = self.html(mode, search_string, results)
-                    error_text = response['error']['message']
-                    logger.log(
-                        ('Call Limit' in error_text
-                         and u'Action aborted because the %(prov)s 150 calls/hr limit was reached'
-                         or u'Action prematurely ended. %(prov)s server error response = %(desc)s') %
-                        {'prov': self.name, 'desc': error_text}, logger.WARNING)
-                    return results
+                        response = self.get_url(self.url_api, post_data=json_rpc(params), parse_json=True)
+                        # response = {'error': {'message': 'Call Limit Exceeded Test'}}
+                        error_text = response['error']['message']
+                    api_up = False
+                    if 'Propers' == mode:
+                        return results
+                    results = self.html(mode, search_string, results)
+                    if not results:
+                        self._check_response(error_text, self.url_api, post_data=json_rpc(params))
+                        return results
                 except AuthException:
                     logger.log('API looks to be down, add un/pw config detail to be used as a fallback', logger.WARNING)
                 except (KeyError, Exception):
@@ -114,7 +128,7 @@ class BTNProvider(generic.TorrentProvider):
 
                 data_json = response and 'result' in response and response['result'] or {}
                 if data_json:
-
+                    self.tmr_limit_count = 0
                     found_torrents = 'torrents' in data_json and data_json['torrents'] or {}
 
                     # We got something, we know the API sends max 1000 results at a time.
@@ -133,15 +147,10 @@ class BTNProvider(generic.TorrentProvider):
                         for page in range(1, pages_needed + 1):
 
                             try:
-                                response = helpers.getURL(
-                                    self.url_api, json=True, session=self.session,
-                                    post_data=json_rpc(params, results_per_page, page * results_per_page))
+                                post_data = json_rpc(params, results_per_page, page * results_per_page)
+                                response = self.get_url(self.url_api, parse_json=True, post_data=post_data)
                                 error_text = response['error']['message']
-                                logger.log(
-                                    ('Call Limit' in error_text
-                                     and u'Action prematurely ended because the %(prov)s 150 calls/hr limit was reached'
-                                     or u'Action prematurely ended. %(prov)s server error response = %(desc)s') %
-                                    {'prov': self.name, 'desc': error_text}, logger.WARNING)
+                                self._check_response(error_text, self.url_api, post_data=post_data)
                                 return results
                             except (KeyError, Exception):
                                 data_json = response and 'result' in response and response['result'] or {}
@@ -149,14 +158,15 @@ class BTNProvider(generic.TorrentProvider):
                             # Note that this these are individual requests and might time out individually.
                             # This would result in 'gaps' in the results. There is no way to fix this though.
                             if 'torrents' in data_json:
+                                self.tmr_limit_count = 0
                                 found_torrents.update(data_json['torrents'])
 
                     cnt = len(results)
-                    for torrentid, torrent_info in found_torrents.iteritems():
-                        seeders, leechers, size = (tryInt(n, n) for n in [torrent_info.get(x) for x in
-                                                                          'Seeders', 'Leechers', 'Size'])
-                        if self._peers_fail(mode, seeders, leechers) or \
-                                self.reject_m2ts and re.match(r'(?i)m2?ts', torrent_info.get('Container', '')):
+                    for torrentid, torrent_info in iteritems(found_torrents):
+                        seeders, leechers, size = (try_int(n, n) for n in [torrent_info.get(x) for x in
+                                                                           ('Seeders', 'Leechers', 'Size')])
+                        if self._reject_item(seeders, leechers, container=self.reject_m2ts and (
+                                re.match(r'(?i)m2?ts', torrent_info.get('Container', '')))):
                             continue
 
                         title, url = self._get_title_and_url(torrent_info)
@@ -175,7 +185,8 @@ class BTNProvider(generic.TorrentProvider):
 
         if self.username and self.password:
             return super(BTNProvider, self)._authorised(
-                post_params={'login': 'Log In!'}, logged_in=(lambda y='': 'casThe' in y[0:4096]))
+                post_params={'login': 'Log In!'},
+                logged_in=(lambda y='': 'casThe' in y[0:512] and '<title>Index' in y[0:512]))
         raise AuthException('Password or Username for %s is empty in config provider options' % self.name)
 
     def html(self, mode, search_string, results):
@@ -193,37 +204,41 @@ class BTNProvider(generic.TorrentProvider):
                 del (self.session.headers['Referer'])
             self.auth_html = True
 
-            search_string = isinstance(search_string, unicode) and unidecode(search_string) or search_string
+            search_string = unidecode(search_string)
             search_url = self.urls['search'] % (search_string, self._categories_string(mode, 'filter_cat[%s]=1'))
 
-            html = helpers.getURL(search_url, session=self.session)
+            html = self.get_url(search_url, use_tmr_limit=False)
+            if self.should_skip(log_warning=False, use_tmr_limit=False):
+                return results
+
             cnt = len(results)
             try:
                 if not html or self._has_no_results(html):
                     raise generic.HaltParseException
 
-                with BS4Parser(html, features=['html5lib', 'permissive']) as soup:
-                    torrent_table = soup.find(id='torrent_table')
-                    torrent_rows = [] if not torrent_table else torrent_table.find_all('tr')
+                with BS4Parser(html) as soup:
+                    tbl = soup.find(id='torrent_table')
+                    tbl_rows = [] if not tbl else tbl.find_all('tr')
 
-                    if 2 > len(torrent_rows):
+                    if 2 > len(tbl_rows):
                         raise generic.HaltParseException
 
-                    rc = dict((k, re.compile('(?i)' + v)) for (k, v) in {
-                        'cats': '(?i)cat\[(?:%s)\]' % self._categories_string(mode, template='', delimiter='|'),
-                        'get': 'download'}.items())
+                    rc = dict([(k, re.compile('(?i)' + v)) for (k, v) in iteritems({
+                        'cats': r'(?i)cat\[(?:%s)\]' % self._categories_string(mode, template='', delimiter='|'),
+                        'get': 'download'})])
 
                     head = None
-                    for tr in torrent_rows[1:]:
+                    for tr in tbl_rows[1:]:
                         cells = tr.find_all('td')
                         if 5 > len(cells):
                             continue
                         try:
                             head = head if None is not head else self._header_row(tr)
-                            seeders, leechers, size = [tryInt(n, n) for n in [
-                                cells[head[x]].get_text().strip() for x in 'seed', 'leech', 'size']]
-                            if ((self.reject_m2ts and re.search(r'(?i)\[.*?m2?ts.*?\]', tr.get_text('', strip=True))) or
-                                    self._peers_fail(mode, seeders, leechers) or not tr.find('a', href=rc['cats'])):
+                            seeders, leechers, size = [try_int(n, n) for n in [
+                                cells[head[x]].get_text().strip() for x in ('seed', 'leech', 'size')]]
+                            if not tr.find('a', href=rc['cats']) or self._reject_item(
+                                    seeders, leechers, container=self.reject_m2ts and (
+                                            re.search(r'(?i)\[.*?m2?ts.*?\]', tr.get_text('', strip=True)))):
                                 continue
 
                             title = tr.select('td span[title]')[0].attrs.get('title').strip()
@@ -236,7 +251,7 @@ class BTNProvider(generic.TorrentProvider):
 
             except generic.HaltParseException:
                 pass
-            except (StandardError, Exception):
+            except (BaseException, Exception):
                 logger.log(u'Failed to parse. Traceback: %s' % traceback.format_exc(), logger.ERROR)
 
             self._log_search(mode, len(results) - cnt, search_url)
@@ -277,85 +292,58 @@ class BTNProvider(generic.TorrentProvider):
 
     def _season_strings(self, ep_obj, **kwargs):
 
-        search_params = []
-        base_params = {'category': 'Season'}
+        base_params = dict(category='Season')
 
         # Search for entire seasons: no need to do special things for air by date or sports shows
-        if ep_obj.show.air_by_date or ep_obj.show.is_sports:
+        if ep_obj.show_obj.air_by_date or ep_obj.show_obj.is_sports:
             # Search for the year of the air by date show
             base_params['name'] = str(ep_obj.airdate).split('-')[0]
-        elif ep_obj.show.is_anime:
+        elif ep_obj.show_obj.is_anime:
             base_params['name'] = '%s' % ep_obj.scene_absolute_number
         else:
-            base_params['name'] = 'Season %s' % (ep_obj.season, ep_obj.scene_season)[bool(ep_obj.show.is_scene)]
+            base_params['name'] = 'Season %s' % (ep_obj.season, ep_obj.scene_season)[bool(ep_obj.show_obj.is_scene)]
 
-        if 1 == ep_obj.show.indexer:
-            base_params['tvdb'] = ep_obj.show.indexerid
-            base_params['series'] = ep_obj.show.name
-            search_params.append(base_params)
-        # elif 2 == ep_obj.show.indexer:
-        #    current_params['tvrage'] = ep_obj.show.indexerid
-        #    search_params.append(current_params)
-        # else:
-        name_exceptions = list(
-            set([helpers.sanitizeSceneName(a) for a in
-                 scene_exceptions.get_scene_exceptions(ep_obj.show.indexerid) + [ep_obj.show.name]]))
-        dedupe = [ep_obj.show.name.replace(' ', '.')]
-        for name in name_exceptions:
-            if name.replace(' ', '.') not in dedupe:
-                dedupe += [name.replace(' ', '.')]
-                series_param = base_params.copy()
-                series_param['series'] = name
-                search_params.append(series_param)
-
-        return [dict(Season=search_params)]
+        return [dict(Season=self.search_params(ep_obj, base_params))]
 
     def _episode_strings(self, ep_obj, **kwargs):
 
         if not ep_obj:
             return [{}]
 
-        search_params = []
-        base_params = {'category': 'Episode'}
+        base_params = dict(category='Episode')
 
-        # episode
-        if ep_obj.show.air_by_date or ep_obj.show.is_sports:
+        if ep_obj.show_obj.air_by_date or ep_obj.show_obj.is_sports:
             date_str = str(ep_obj.airdate)
 
             # BTN uses dots in dates, we just search for the date since that
             # combined with the series identifier should result in just one episode
             base_params['name'] = date_str.replace('-', '.')
-        elif ep_obj.show.is_anime:
+        elif ep_obj.show_obj.is_anime:
             base_params['name'] = '%s' % ep_obj.scene_absolute_number
         else:
             # Do a general name search for the episode, formatted like SXXEYY
             season, episode = ((ep_obj.season, ep_obj.episode),
-                               (ep_obj.scene_season, ep_obj.scene_episode))[bool(ep_obj.show.is_scene)]
+                               (ep_obj.scene_season, ep_obj.scene_episode))[bool(ep_obj.show_obj.is_scene)]
             base_params['name'] = 'S%02dE%02d' % (season, episode)
 
-        # search
-        if 1 == ep_obj.show.indexer:
-            base_params['tvdb'] = ep_obj.show.indexerid
-            base_params['series'] = ep_obj.show.name
+        return [dict(Episode=self.search_params(ep_obj, base_params))]
+
+    @staticmethod
+    def search_params(ep_obj, base_params):
+        search_params = []
+
+        if TVINFO_TVDB == ep_obj.show_obj.tvid:
+            base_params['tvdb'] = ep_obj.show_obj.prodid
+            base_params['series'] = ep_obj.show_obj.name
             search_params.append(base_params)
-        # elif 2 == ep_obj.show.indexer:
-        #    search_params['tvrage'] = ep_obj.show.indexerid
-        #    to_return.append(search_params)
 
-        # else:
-            # add new query string for every exception
-        name_exceptions = list(
-            set([helpers.sanitizeSceneName(a) for a in
-                 scene_exceptions.get_scene_exceptions(ep_obj.show.indexerid) + [ep_obj.show.name]]))
-        dedupe = [ep_obj.show.name.replace(' ', '.')]
+        name_exceptions = get_show_names(ep_obj)
         for name in name_exceptions:
-            if name.replace(' ', '.') not in dedupe:
-                dedupe += [name.replace(' ', '.')]
-                series_param = base_params.copy()
-                series_param['series'] = name
-                search_params.append(series_param)
+            series_param = base_params.copy()
+            series_param['series'] = name
+            search_params.append(series_param)
 
-        return [dict(Episode=search_params)]
+        return search_params
 
     def cache_data(self, **kwargs):
 
@@ -384,7 +372,7 @@ class BTNCache(tvcache.TVCache):
 
         self.update_freq = 15
 
-    def _cache_data(self):
+    def _cache_data(self, **kwargs):
 
         return self.provider.cache_data(age=self._getLastUpdate().timetuple(), min_time=self.update_freq)
 

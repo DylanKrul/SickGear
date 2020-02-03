@@ -17,179 +17,88 @@
 # along with SickGear.  If not, see <http://www.gnu.org/licenses/>.
 
 from __future__ import print_function
-import socket
+import re
 
+from .generic import Notifier, notify_strings
+from exceptions_helper import ex
+from lib.apprise.plugins.NotifyGrowl.gntp import notifier as growl_notifier
 import sickbeard
 
-from sickbeard import logger, common
-from sickbeard.exceptions import ex
-
-from lib.growl import gntp
+from six import string_types
 
 
-class GrowlNotifier:
-    def test_notify(self, host, password):
-        self._sendRegistration(host, password, 'Test')
-        return self._sendGrowl('Test Growl', 'Testing Growl settings from SickGear', 'Test', host, password,
-                               force=True)
+class GrowlNotifier(Notifier):
 
-    def notify_snatch(self, ep_name):
-        if sickbeard.GROWL_NOTIFY_ONSNATCH:
-            self._sendGrowl(common.notifyStrings[common.NOTIFY_SNATCH], ep_name)
+    def __init__(self):
+        super(GrowlNotifier, self).__init__()
 
-    def notify_download(self, ep_name):
-        if sickbeard.GROWL_NOTIFY_ONDOWNLOAD:
-            self._sendGrowl(common.notifyStrings[common.NOTIFY_DOWNLOAD], ep_name)
+    def _send_growl_msg(self, options, message=None):
 
-    def notify_subtitle_download(self, ep_name, lang):
-        if sickbeard.GROWL_NOTIFY_ONSUBTITLEDOWNLOAD:
-            self._sendGrowl(common.notifyStrings[common.NOTIFY_SUBTITLE_DOWNLOAD], ep_name + ': ' + lang)
-            
-    def notify_git_update(self, new_version = '??'):
-        if sickbeard.USE_GROWL:
-            update_text=common.notifyStrings[common.NOTIFY_GIT_UPDATE_TEXT]
-            title=common.notifyStrings[common.NOTIFY_GIT_UPDATE]
-            self._sendGrowl(title, update_text + new_version)
+        notice = growl_notifier.GrowlNotifier(applicationName=options['app'],
+                                              applicationIcon=self._sg_logo_url,
+                                              hostname=options['host'],
+                                              password=None if not options['password'] else options['password'],
+                                              port=options['port'],
+                                              notifications=['Test'] + [notify_strings[s] for s in
+                                                                        ('snatch', 'download', 'git_updated',
+                                                                         'subtitle_download', 'test_title')]
+                                              )
 
-    def _send_growl(self, options, message=None):
+        def _send_growl():
+            try:
+                r = notice.notify(noteType=options['name'], title=options['title'], sticky=bool(options['sticky']),
+                                  priority=options['priority'],
+                                  description=message if isinstance(message, string_types) and 0 < len(message.strip())
+                                  else 'Test')
+            except (BaseException, Exception):
+                return False
+            return r
 
-        #Send Notification
-        notice = gntp.GNTPNotice()
+        result = _send_growl()
+        if isinstance(result, bool):
+            return result
+        # check if growl is not yet registered with the app
+        if isinstance(result, tuple) and '401' == result[0]:
+            try:
+                notice.register()
+            except (BaseException, Exception):
+                return False
+            result = _send_growl()
+            if isinstance(result, bool):
+                return result
 
-        #Required
-        notice.add_header('Application-Name', options['app'])
-        notice.add_header('Notification-Name', options['name'])
-        notice.add_header('Notification-Title', options['title'])
-
-        if options['password']:
-            notice.set_password(options['password'])
-
-        #Optional
-        if options['sticky']:
-            notice.add_header('Notification-Sticky', options['sticky'])
-        if options['priority']:
-            notice.add_header('Notification-Priority', options['priority'])
-        if options['icon']:
-            notice.add_header('Notification-Icon',
-                              'https://raw.github.com/SickGear/SickGear/master/gui/slick/images/sickgear.png')
-
-        if message:
-            notice.add_header('Notification-Text', message)
-
-        response = self._send(options['host'], options['port'], notice.encode(), options['debug'])
-        if isinstance(response, gntp.GNTPOK): return True
         return False
 
-    def _send(self, host, port, data, debug=False):
-        if debug: print('<Sending>\n', data, '\n</Sending>')
+    def _notify(self, title, body, name=None, host=None, password=None, **kwargs):
 
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.connect((host, port))
-        s.send(data)
-        response = gntp.parse_gntp(s.recv(1024))
-        s.close()
+        name = name or title or 'SickGear Notification'
 
-        if debug: print('<Recieved>\n', response, '\n</Recieved>')
+        hosts = [h.strip() for h in self._choose(host, sickbeard.GROWL_HOST).split(',')]
+        growl_hosts = []
+        host_re = re.compile(r'^(?:(?P<password>[^@]+?)@)?(?P<host>[^:]+?)(?::(?P<port>\d+))?$')
+        for h in hosts:
+            host_parts = host_re.match(h)
+            if host_parts:
+                host, port, password = host_parts.group('host'), host_parts.group('port'), host_parts.group('password')
+                if host:
+                    growl_hosts += [(host, 23053 if not port else int(port), None if not password else password)]
 
-        return response
+        opts = dict(title=title, name=name, app='SickGear', sticky=None, priority=None,
+                    icon=True, debug=False)
 
-    def _sendGrowl(self, title='SickGear Notification', message=None, name=None, host=None, password=None,
-                   force=False):
-        if not sickbeard.USE_GROWL and not force:
-            return False
-
-        if name == None:
-            name = title
-
-        if host == None:
-            hostParts = sickbeard.GROWL_HOST.split(':')
-        else:
-            hostParts = host.split(':')
-
-        if len(hostParts) != 2 or hostParts[1] == '':
-            port = 23053
-        else:
-            port = int(hostParts[1])
-
-        growlHosts = [(hostParts[0], port)]
-
-        opts = {}
-
-        opts['name'] = name
-
-        opts['title'] = title
-        opts['app'] = 'SickGear'
-
-        opts['sticky'] = None
-        opts['priority'] = None
-        opts['debug'] = False
-
-        if password == None:
-            opts['password'] = sickbeard.GROWL_PASSWORD
-        else:
-            opts['password'] = password
-
-        opts['icon'] = True
-
-        for pc in growlHosts:
+        success = False
+        for pc in growl_hosts:
             opts['host'] = pc[0]
             opts['port'] = pc[1]
-            logger.log(u'GROWL: Sending message "' + message + '" to ' + opts['host'] + ':' + str(opts['port']), logger.DEBUG)
+            opts['password'] = pc[2]
             try:
-                if self._send_growl(opts, message):
-                    return True
-                else:
-                    if self._sendRegistration(host, password, 'Sickbeard'):
-                        return self._send_growl(opts, message)
-                    else:
-                        return False
-            except Exception as e:
-                logger.log(u'GROWL: Unable to send growl to ' + opts['host'] + ':' + str(opts['port']) + ' - ' + ex(e), logger.WARNING)
-                return False
+                if self._send_growl_msg(opts, body):
+                    success = True
 
-    def _sendRegistration(self, host=None, password=None, name='SickGear Notification'):
-        opts = {}
+            except (BaseException, Exception) as e:
+                self._log_warning(u'Unable to send growl to %s:%s - %s' % (opts['host'], opts['port'], ex(e)))
 
-        if host == None:
-            hostParts = sickbeard.GROWL_HOST.split(':')
-        else:
-            hostParts = host.split(':')
-
-        if len(hostParts) != 2 or hostParts[1] == '':
-            port = 23053
-        else:
-            port = int(hostParts[1])
-
-        opts['host'] = hostParts[0]
-        opts['port'] = port
-
-        if password == None:
-            opts['password'] = sickbeard.GROWL_PASSWORD
-        else:
-            opts['password'] = password
-
-        opts['app'] = 'SickGear'
-        opts['debug'] = False
-
-        #Send Registration
-        register = gntp.GNTPRegister()
-        register.add_header('Application-Name', opts['app'])
-        register.add_header('Application-Icon',
-                            'https://raw.githubusercontent.com/SickGear/SickGear/master/gui/slick/images/ico/apple-touch-icon-72x72.png')
-
-        register.add_notification('Test', True)
-        register.add_notification(common.notifyStrings[common.NOTIFY_SNATCH], True)
-        register.add_notification(common.notifyStrings[common.NOTIFY_DOWNLOAD], True)
-        register.add_notification(common.notifyStrings[common.NOTIFY_GIT_UPDATE], True)
-        
-        if opts['password']:
-            register.set_password(opts['password'])
-
-        try:
-            return self._send(opts['host'], opts['port'], register.encode(), opts['debug'])
-        except Exception as e:
-            logger.log(u'GROWL: Unable to send growl to ' + opts['host'] + ':' + str(opts['port']) + ' - ' + ex(e), logger.WARNING)
-            return False
+        return success
 
 
 notifier = GrowlNotifier

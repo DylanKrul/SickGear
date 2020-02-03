@@ -1,6 +1,6 @@
 #import sickbeard
 #from sickbeard import common
-#from sickbeard import exceptions
+#from lib import exceptions_helper as exceptions
 <% def sg_var(varname, default=False): return getattr(sickbeard, varname, default) %>#slurp#
 <% def sg_str(varname, default=''): return getattr(sickbeard, varname, default) %>#slurp#
 ##
@@ -21,8 +21,10 @@
 <script type="text/javascript" src="$sbRoot/js/qualityChooser.js?v=$sbPID"></script>
 <script type="text/javascript" src="$sbRoot/js/massEdit.js?v=$sbPID"></script>
 
-<form action="massEditSubmit" method="post">
-	<input type="hidden" name="toEdit" value="$showList">
+<form action="mass_edit_submit" method="post">
+	$xsrf_form_html
+
+	<input type="hidden" name="to_edit" value="$showList">
 
 	<div class="optionWrapper">
 		<span class="selectTitle">Parent folder <span class="separator">*</span></span><br />
@@ -53,7 +55,7 @@
 	<div class="optionWrapper">
 		<span class="selectTitle">Quality</span>
 		<div class="selectChoices">
-			<select id="qualityPreset" name="quality_preset" class="form-control form-control-inline input-sm">
+			<select id="quality-preset" name="quality_preset" class="form-control form-control-inline input-sm">
 				<option value="keep">&lt; keep &gt;</option>
 				<option value="0"  #if None is not $quality_value and $quality_value not in $common.qualityPresets then $selected else ''#>Custom</option>
 #for $curPreset in sorted($common.qualityPresets):
@@ -62,22 +64,22 @@
 			</select>
 		</div><br />
 
-		<div id="customQuality" class="show-if-quality-custom">
+		<div id="custom-quality" class="show-if-quality-custom">
 			<div class="manageCustom pull-left">
 				<h4 style="font-size:14px">Initial</h4>
 #set $anyQualityList = filter(lambda x: x > $common.Quality.NONE, $common.Quality.qualityStrings)
-				<select id="anyQualities" name="anyQualities" multiple="multiple" size="$len($anyQualityList)">
+				<select id="wanted-qualities" name="any_qualities" multiple="multiple" size="$len($anyQualityList)">
 #for $curQuality in sorted($anyQualityList):
-					<option value="$curQuality" #if $curQuality in $anyQualities then $selected else ''#>$common.Quality.qualityStrings[$curQuality]</option>
+					<option value="$curQuality" #if $curQuality in $anyQualities then $selected else ''#>$common.Quality.get_quality_ui($curQuality)</option>
 #end for
 				</select>
 			</div>
 			<div class="manageCustom pull-left">
 				<h4 style="font-size:14px">Upgrade to</h4>
 #set $bestQualityList = filter(lambda x: x > $common.Quality.SDTV, $common.Quality.qualityStrings)
-				<select id="bestQualities" name="bestQualities" multiple="multiple" size="$len($bestQualityList)">
+				<select id="upgrade-qualities" name="best_qualities" multiple="multiple" size="$len($bestQualityList)">
 #for $curQuality in sorted($bestQualityList):
-					<option value="$curQuality" #if $curQuality in $bestQualities then $selected else ''#>$common.Quality.qualityStrings[$curQuality]</option>
+					<option value="$curQuality" #if $curQuality in $bestQualities then $selected else ''#>$common.Quality.get_quality_ui($curQuality)</option>
 #end for
 				</select>
 			</div><br />
@@ -88,11 +90,11 @@
 	#set $isSelected = ' selected="selected"'
 	#set $isEnabled = $isSelected
 	#set $isDisabled = $isSelected
-	#if $archive_firstmatch_value##set $isDisabled = ''##else##set $isEnabled = ''##end if#
+	#if $upgrade_once_value##set $isDisabled = ''##else##set $isEnabled = ''##end if#
 	<div class="optionWrapper clearfix">
 		<span class="selectTitle">Upgrade once</span>
 		<div class="selectChoices">
-			<select id="edit_archive_firstmatch" name="archive_firstmatch" class="form-control form-control-inline input-sm">
+			<select id="edit_upgrade-once" name="upgrade_once" class="form-control form-control-inline input-sm">
 				<option value="keep">&lt; keep &gt;</option>
 				<option value="enable"${isEnabled}>enable</option>
 				<option value="disable"${isDisabled}>disable</option>
@@ -137,7 +139,7 @@
 	<div class="optionWrapper">
 	<span class="selectTitle">Subtitles<span class="separator"></span></span>
 		<div class="selectChoices">
-			<select id="edit_subtitles" name="subtitles" class="form-control form-control-inline input-sm">
+			<select id="edit_subtitles" name="subs" class="form-control form-control-inline input-sm">
 				<option value="keep">&lt; keep &gt;</option>
 				<option value="enable" #if $subtitles_value then $selected else ''#>enable</option>
 				<option value="disable" #if $subtitles_value == False then $selected else ''#>disable</option>
@@ -167,8 +169,16 @@
 		</div><br />
 	</div>
 
+	<div class="optionWrapper" >
+		<span class="selectTitle">Keep up to <span class="grey-text">(0 = no prune)</span></span>
+		<div class="selectChoices">
+			<input type="text" name="prune" id="prune" value="#if None is not $prune_value then $prune_value else ''#" class="form-control form-control-inline input-sm input75" style="width:50px;margin-top:0">
+			<span>blank = no change</span>
+		</div><br />
+	</div>
+
 	<div class="optionWrapper #if $sg_str('SHOWLIST_TAGVIEW') != 'custom' then 'hidden' else ''#">
-		<span class="selectTitle">Show is grouped in</span>
+		<span class="selectTitle">Place show in group</span>
 		<div class="selectChoices">
 			<select id="edit_tag" name="tag" class="form-control form-control-inline input-sm">
 				<option value="keep">&lt; keep &gt;</option>

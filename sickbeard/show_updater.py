@@ -17,17 +17,20 @@
 # along with SickGear.  If not, see <http://www.gnu.org/licenses/>.
 
 import datetime
+import traceback
+
+import exceptions_helper
+from exceptions_helper import ex
 
 import sickbeard
-from sickbeard import logger, exceptions, ui, db, network_timezones, failed_history
-from sickbeard.exceptions import ex
+from . import db, failed_history, logger, network_timezones, properFinder, ui
 
 
-class ShowUpdater:
+class ShowUpdater(object):
     def __init__(self):
         self.amActive = False
 
-    def run(self, force=False):
+    def run(self):
 
         self.amActive = True
 
@@ -36,36 +39,77 @@ class ShowUpdater:
             update_date = update_datetime.date()
 
             # refresh network timezones
-            network_timezones.update_network_dict()
+            try:
+                network_timezones.update_network_dict()
+            except (BaseException, Exception):
+                logger.log('network timezone update error', logger.ERROR)
+                logger.log(traceback.format_exc(), logger.ERROR)
+
+            # refresh webdl types
+            try:
+                properFinder.load_webdl_types()
+            except (BaseException, Exception):
+                logger.log('error loading webdl_types', logger.DEBUG)
 
             # update xem id lists
-            sickbeard.scene_exceptions.get_xem_ids()
+            try:
+                sickbeard.scene_exceptions.get_xem_ids()
+            except (BaseException, Exception):
+                logger.log('xem id list update error', logger.ERROR)
+                logger.log(traceback.format_exc(), logger.ERROR)
 
             # update scene exceptions
-            sickbeard.scene_exceptions.retrieve_exceptions()
+            try:
+                sickbeard.scene_exceptions.retrieve_exceptions()
+            except (BaseException, Exception):
+                logger.log('scene exceptions update error', logger.ERROR)
+                logger.log(traceback.format_exc(), logger.ERROR)
 
             # sure, why not?
             if sickbeard.USE_FAILED_DOWNLOADS:
-                failed_history.remove_old_history()
+                try:
+                    failed_history.remove_old_history()
+                except (BaseException, Exception):
+                    logger.log('Failed History cleanup error', logger.ERROR)
+                    logger.log(traceback.format_exc(), logger.ERROR)
 
             # clear the data of unused providers
-            sickbeard.helpers.clear_unused_providers()
+            try:
+                sickbeard.helpers.clear_unused_providers()
+            except (BaseException, Exception):
+                logger.log('unused provider cleanup error', logger.ERROR)
+                logger.log(traceback.format_exc(), logger.ERROR)
 
             # cleanup image cache
-            sickbeard.helpers.cleanup_cache()
+            try:
+                sickbeard.helpers.cleanup_cache()
+            except (BaseException, Exception):
+                logger.log('image cache cleanup error', logger.ERROR)
+                logger.log(traceback.format_exc(), logger.ERROR)
+
+            # cleanup manual search history
+            sickbeard.search_queue.remove_old_fifo(sickbeard.search_queue.MANUAL_SEARCH_HISTORY)
 
             # add missing mapped ids
             if not sickbeard.background_mapping_task.is_alive():
-                logger.log(u'Updating the Indexer mappings')
+                logger.log(u'Updating the TV info mappings')
                 import threading
-                sickbeard.background_mapping_task = threading.Thread(
-                    name='LOAD-MAPPINGS', target=sickbeard.indexermapper.load_mapped_ids, kwargs={'update': True})
-                sickbeard.background_mapping_task.start()
+                try:
+                    sickbeard.background_mapping_task = threading.Thread(
+                        name='LOAD-MAPPINGS', target=sickbeard.indexermapper.load_mapped_ids, kwargs={'update': True})
+                    sickbeard.background_mapping_task.start()
+                except (BaseException, Exception):
+                    logger.log('missing mapped ids update error', logger.ERROR)
+                    logger.log(traceback.format_exc(), logger.ERROR)
 
             logger.log(u'Doing full update on all shows')
 
             # clean out cache directory, remove everything > 12 hours old
-            sickbeard.helpers.clearCache()
+            try:
+                sickbeard.helpers.clear_cache()
+            except (BaseException, Exception):
+                logger.log('cache dir cleanup error', logger.ERROR)
+                logger.log(traceback.format_exc(), logger.ERROR)
 
             # select 10 'Ended' tv_shows updated more than 90 days ago
             # and all shows not updated more then 180 days ago to include in this update
@@ -74,39 +118,48 @@ class ShowUpdater:
             stale_update_date_max = (update_date - datetime.timedelta(days=180)).toordinal()
 
             # last_update_date <= 90 days, sorted ASC because dates are ordinal
+            from sickbeard.tv import TVidProdid
             my_db = db.DBConnection()
-            sql_results = my_db.mass_action([
-                ['SELECT indexer_id FROM tv_shows WHERE last_update_indexer <= ? AND ' +
-                 'last_update_indexer >= ? ORDER BY last_update_indexer ASC LIMIT 10;',
-                 [stale_update_date, stale_update_date_max]],
-                ['SELECT indexer_id FROM tv_shows WHERE last_update_indexer < ?;', [stale_update_date_max]]])
+            # noinspection SqlRedundantOrderingDirection
+            mass_sql_result = my_db.mass_action([
+                ['SELECT indexer || ? || indexer_id AS tvid_prodid'
+                 ' FROM tv_shows'
+                 ' WHERE last_update_indexer <= ?'
+                 ' AND last_update_indexer >= ?'
+                 ' ORDER BY last_update_indexer ASC LIMIT 10;',
+                 [TVidProdid.glue, stale_update_date, stale_update_date_max]],
+                ['SELECT indexer || ? || indexer_id AS tvid_prodid'
+                 ' FROM tv_shows'
+                 ' WHERE last_update_indexer < ?;',
+                 [TVidProdid.glue, stale_update_date_max]]])
 
-            for sql_result in sql_results:
+            for sql_result in mass_sql_result:
                 for cur_result in sql_result:
-                    stale_should_update.append(int(cur_result['indexer_id']))
+                    stale_should_update.append(cur_result['tvid_prodid'])
 
             # start update process
             pi_list = []
-            for curShow in sickbeard.showList:
+            for cur_show_obj in sickbeard.showList:  # type: sickbeard.tv.TVShow
 
                 try:
-                    # get next episode airdate
-                    curShow.nextEpisode()
-
                     # if should_update returns True (not 'Ended') or show is selected stale 'Ended' then update,
                     # otherwise just refresh
-                    if curShow.should_update(update_date=update_date) or curShow.indexerid in stale_should_update:
-                        cur_queue_item = sickbeard.showQueueScheduler.action.updateShow(curShow, scheduled_update=True)
+                    if cur_show_obj.should_update(update_date=update_date) \
+                            or cur_show_obj.tvid_prodid in stale_should_update:
+                        cur_queue_item = sickbeard.showQueueScheduler.action.updateShow(cur_show_obj,
+                                                                                        scheduled_update=True)
                     else:
-                        logger.log(
-                            u'Not updating episodes for show ' + curShow.name + ' because it\'s marked as ended and ' +
-                            'last/next episode is not within the grace period.', logger.DEBUG)
-                        cur_queue_item = sickbeard.showQueueScheduler.action.refreshShow(curShow, True, True, force_image_cache=True)
+                        logger.log(u'Not updating episodes for show %s because it\'s marked as ended and last/next'
+                                   u' episode is not within the grace period.' % cur_show_obj.name, logger.DEBUG)
+                        cur_queue_item = sickbeard.showQueueScheduler.action.refreshShow(cur_show_obj, True, True)
 
                     pi_list.append(cur_queue_item)
 
-                except (exceptions.CantUpdateException, exceptions.CantRefreshException) as e:
+                except (exceptions_helper.CantUpdateException, exceptions_helper.CantRefreshException) as e:
                     logger.log(u'Automatic update failed: ' + ex(e), logger.ERROR)
+
+            if len(pi_list):
+                sickbeard.showQueueScheduler.action.daily_update_running = True
 
             ui.ProgressIndicators.setIndicator('dailyUpdate', ui.QueueProgressIndicator('Daily Update', pi_list))
 

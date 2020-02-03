@@ -19,33 +19,39 @@ import re
 import traceback
 
 from . import generic
-from sickbeard import logger
-from sickbeard.bs4_parser import BS4Parser
-from sickbeard.helpers import tryInt
-from lib.unidecode import unidecode
+from .. import logger
+from ..helpers import try_int
+from bs4_parser import BS4Parser
+
+from _23 import unidecode
+from six import iteritems, PY2
 
 
 class TorrentLeechProvider(generic.TorrentProvider):
     def __init__(self):
-        generic.TorrentProvider.__init__(self, 'TorrentLeech', cache_update_freq=20)
+        generic.TorrentProvider.__init__(self, 'TorrentLeech')
 
-        self.url_base = 'https://torrentleech.org/'
+        self.url_base = 'https://v4.torrentleech.org/'
         self.urls = {'config_provider_home_uri': self.url_base,
-                     'login_action': self.url_base,
-                     'browse': self.url_base + 'torrents/browse/index/categories/%(cats)s',
-                     'search': self.url_base + 'torrents/browse/index/query/%(query)s/categories/%(cats)s',
-                     'get': self.url_base + '%s'}
+                     'login': self.url_base,
+                     'browse': self.url_base + 'torrents/browse/index/categories/%(cats)s/%(x)s',
+                     'search': self.url_base + 'torrents/browse/index/query/%(query)s/categories/%(cats)s/%(x)s'}
 
         self.categories = {'shows': [2, 26, 27, 32], 'anime': [7, 34, 35]}
 
         self.url = self.urls['config_provider_home_uri']
-
-        self.username, self.password, self.minseed, self.minleech = 4 * [None]
+        self.digest, self.minseed, self.minleech, self.freeleech = 4 * [None]
 
     def _authorised(self, **kwargs):
 
-        return super(TorrentLeechProvider, self)._authorised(logged_in=(lambda y=None: self.has_all_cookies(pre='tl')),
-                                                             post_params={'remember_me': 'on', 'form_tmpl': True})
+        return super(TorrentLeechProvider, self)._authorised(
+            logged_in=(lambda y='': all(
+                ['TorrentLeech' in y, 'type="password"' not in y[0:4096], self.has_all_cookies(pre='tl')])),
+            failed_msg=(lambda y=None: u'Invalid cookie details for %s. Check settings'))
+
+    @staticmethod
+    def _has_signature(data=None):
+        return generic.TorrentProvider._has_signature(data) or (data and re.search(r'(?i)<title[^<]+?leech', data))
 
     def _search_provider(self, search_params, **kwargs):
 
@@ -53,45 +59,80 @@ class TorrentLeechProvider(generic.TorrentProvider):
         if not self._authorised():
             return results
 
+        last_recent_search = self.last_recent_search
+        last_recent_search = '' if not last_recent_search else last_recent_search.replace('id-', '')
+        for mode in search_params:
+            urls = []
+            for search_string in search_params[mode]:
+                urls += [[]]
+                for page in range((3, 5)['Cache' == mode])[1:]:
+                    urls[-1] += [self.urls[('search', 'browse')['Cache' == mode]] % {
+                        'cats': self._categories_string(mode, '', ','),
+                        'query': unidecode(search_string) or search_string,
+                        'x': '%spage/%s' % (('facets/tags:FREELEECH/', '')[not self.freeleech], page)
+                    }]
+            results += self._search_urls(mode, last_recent_search, urls)
+            last_recent_search = ''
+
+        return results
+
+    def _search_urls(self, mode, last_recent_search, urls):
+
+        results = []
         items = {'Cache': [], 'Season': [], 'Episode': [], 'Propers': []}
 
-        rc = dict((k, re.compile('(?i)' + v)) for (k, v) in {'get': 'download'}.items())
-        for mode in search_params.keys():
-            for search_string in search_params[mode]:
-                search_url = self.urls[('search', 'browse')['Cache' == mode]] % {
-                    'cats': self._categories_string(mode, '', ','),
-                    'query': isinstance(search_string, unicode) and unidecode(search_string) or search_string}
+        rc = dict((k, re.compile('(?i)' + v)) for (k, v) in iteritems(dict(get='download', id=r'download.*?/([\d]+)')))
+        lrs_found = False
+        lrs_new = True
+        for search_urls in urls:  # this intentionally iterates once to preserve indentation
+            for search_url in search_urls:
 
                 html = self.get_url(search_url)
+                if self.should_skip():
+                    return results
 
                 cnt = len(items[mode])
+                cnt_search = 0
+                log_settings_hint = False
                 try:
                     if not html or self._has_no_results(html):
                         raise generic.HaltParseException
 
-                    with BS4Parser(html, features=['html5lib', 'permissive']) as soup:
-                        torrent_table = soup.find(id='torrenttable')
-                        torrent_rows = [] if not torrent_table else torrent_table.find_all('tr')
+                    with BS4Parser(html) as soup:
+                        tbl = soup.find(id='torrenttable')
+                        tbl_rows = [] if not tbl else tbl.find_all('tr')
 
-                        if 2 > len(torrent_rows):
+                        if 2 > len(tbl_rows):
                             raise generic.HaltParseException
 
+                        if 'Cache' == mode and 100 > len(tbl_rows):
+                            log_settings_hint = True
+
                         head = None
-                        for tr in torrent_rows[1:]:
+                        for tr in tbl_rows[1:]:
                             cells = tr.find_all('td')
                             if 6 > len(cells):
                                 continue
+                            cnt_search += 1
                             try:
                                 head = head if None is not head else self._header_row(tr)
-                                seeders, leechers = [tryInt(n) for n in [
-                                    tr.find('td', class_=x).get_text().strip() for x in 'seeders', 'leechers']]
-                                if self._peers_fail(mode, seeders, leechers):
+
+                                dl = tr.find('a', href=rc['get'])['href']
+                                dl_id = rc['id'].findall(dl)[0]
+                                lrs_found = dl_id == last_recent_search
+                                if lrs_found:
+                                    break
+
+                                seeders, leechers = [try_int(n) for n in [
+                                    tr.find('td', class_=x).get_text().strip() for x in ('seeders', 'leechers')]]
+                                if self._reject_item(seeders, leechers):
                                     continue
 
                                 info = tr.find('td', class_='name').a
                                 title = (info.attrs.get('title') or info.get_text()).strip()
                                 size = cells[head['size']].get_text().strip()
-                                download_url = self._link(tr.find('a', href=rc['get'])['href'])
+                                # noinspection PyUnresolvedReferences
+                                download_url = self._link(dl, url_quote=PY2 and isinstance(dl, unicode) or None)
                             except (AttributeError, TypeError, ValueError):
                                 continue
 
@@ -100,9 +141,13 @@ class TorrentLeechProvider(generic.TorrentProvider):
 
                 except generic.HaltParseException:
                     pass
-                except (StandardError, Exception):
+                except (BaseException, Exception):
                     logger.log(u'Failed to parse. Traceback: %s' % traceback.format_exc(), logger.ERROR)
-                self._log_search(mode, len(items[mode]) - cnt, search_url)
+                self._log_search(mode, len(items[mode]) - cnt, search_url, log_settings_hint)
+
+                if self.is_search_finished(mode, items, cnt_search, rc['id'], last_recent_search, lrs_new, lrs_found):
+                    break
+                lrs_new = False
 
             results = self._sort_seeding(mode, results + items[mode])
 
@@ -110,7 +155,10 @@ class TorrentLeechProvider(generic.TorrentProvider):
 
     def _episode_strings(self, ep_obj, **kwargs):
 
-        return generic.TorrentProvider._episode_strings(self, ep_obj, sep_date='|', **kwargs)
+        return super(TorrentLeechProvider, self)._episode_strings(ep_obj, sep_date='|', **kwargs)
+
+    def ui_string(self, key):
+        return 'torrentleech_digest' == key and self._valid_home() and 'use... \'tluid=xx; tlpass=yy\'' or ''
 
 
 provider = TorrentLeechProvider()

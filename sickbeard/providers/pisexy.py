@@ -17,10 +17,12 @@ import re
 import traceback
 
 from . import generic
-from sickbeard import logger
-from sickbeard.bs4_parser import BS4Parser
-from sickbeard.helpers import tryInt
-from lib.unidecode import unidecode
+from .. import logger
+from ..helpers import try_int
+from bs4_parser import BS4Parser
+
+from _23 import unidecode
+from six import iteritems, string_types
 
 
 class PiSexyProvider(generic.TorrentProvider):
@@ -31,8 +33,7 @@ class PiSexyProvider(generic.TorrentProvider):
         self.url_base = 'https://pisexy.me/'
         self.urls = {'config_provider_home_uri': self.url_base,
                      'login': self.url_base + 'takelogin.php',
-                     'search': self.url_base + 'browseall.php?search=%s',
-                     'get': self.url_base + '%s'}
+                     'search': self.url_base + 'browseall.php?search=%s'}
 
         self.url = self.urls['config_provider_home_uri']
 
@@ -51,46 +52,54 @@ class PiSexyProvider(generic.TorrentProvider):
 
         items = {'Cache': [], 'Season': [], 'Episode': [], 'Propers': []}
 
-        rc = dict((k, re.compile('(?i)' + v)) for (k, v) in {
-            'info': 'download', 'get': 'download', 'valid_cat': 'cat=(?:0|50[12])', 'filter': 'free',
-            'title': r'Download\s([^\s]+).*', 'seeders': r'(^\d+)', 'leechers': r'(\d+)$'}.items())
-        for mode in search_params.keys():
+        rc = dict([(k, re.compile('(?i)' + v)) for (k, v) in iteritems({
+            'get': r'info.php\?id', 'cats': 'cat=(?:0|50[12])', 'filter': 'free',
+            'title': r'Download\s([^"\']+)', 'seeders': r'(^\d+)', 'leechers': r'(\d+)$'})])
+        for mode in search_params:
             for search_string in search_params[mode]:
-                search_string = isinstance(search_string, unicode) and unidecode(search_string) or search_string
+                search_string = unidecode(search_string)
                 search_url = self.urls['search'] % search_string
 
                 html = self.get_url(search_url)
+                if self.should_skip():
+                    return results
 
                 cnt = len(items[mode])
                 try:
                     if not html or self._has_no_results(html):
                         raise generic.HaltParseException
 
-                    with BS4Parser(html, features=['html5lib', 'permissive']) as soup:
-                        torrent_table = soup.find('table', 'listor')
-                        torrent_rows = [] if not torrent_table else torrent_table.find_all('tr')
+                    with BS4Parser(html, parse_only=dict(table={'class': 'listor'})) as tbl:
+                        tbl_rows = [] if not tbl else tbl.find_all('tr')
 
-                        if 2 > len(torrent_rows):
+                        if 2 > len(tbl_rows):
                             raise generic.HaltParseException
 
                         head = None
-                        for tr in torrent_rows[1:]:
+                        for tr in tbl_rows[1:]:
                             cells = tr.find_all('td')
                             if 5 > len(cells):
                                 continue
                             try:
                                 head = head if None is not head else self._header_row(tr, {'seed': r'(?:see/lee|seed)'})
                                 seeders, leechers = 2 * [cells[head['seed']].get_text().strip()]
-                                seeders, leechers = [tryInt(n) for n in [
+                                seeders, leechers = [try_int(n) for n in [
                                     rc['seeders'].findall(seeders)[0], rc['leechers'].findall(leechers)[0]]]
-                                if self._peers_fail(mode, seeders, leechers) or not tr.find('a', href=rc['valid_cat']) \
-                                        or (self.freeleech and not tr.find('img', src=rc['filter'])):
+                                if not tr.find('a', href=rc['cats']) or self._reject_item(
+                                        seeders, leechers, self.freeleech and not tr.find('img', src=rc['filter'])):
                                     continue
 
-                                info = tr.find('a', href=rc['info'])
-                                title = (rc['title'].sub('', info.attrs.get('title', '')) or info.get_text()).strip()
+                                info = tr.find('a', href=rc['get'])
+                                tag = tr.find('a', alt=rc['title']) or tr.find('a', title=rc['title'])
+                                title = tag and rc['title'].findall(str(tag))
+                                title = title and title[0]
+                                if not isinstance(title, string_types) or 10 > len(title):
+                                    title = (rc['title'].sub(r'\1', info.attrs.get('title', ''))
+                                             or info.get_text()).strip()
+                                if (10 > len(title)) or (4 > len(re.sub(r'[^.\-\s]', '', title))):
+                                    continue
                                 size = cells[head['size']].get_text().strip()
-                                download_url = self._link(tr.find('a', href=rc['get'])['href'])
+                                download_url = self._link(info['href'])
                             except (AttributeError, TypeError, ValueError, KeyError, IndexError):
                                 continue
 
@@ -99,7 +108,7 @@ class PiSexyProvider(generic.TorrentProvider):
 
                 except generic.HaltParseException:
                     pass
-                except (StandardError, Exception):
+                except (BaseException, Exception):
                     logger.log(u'Failed to parse. Traceback: %s' % traceback.format_exc(), logger.ERROR)
 
                 self._log_search(mode, len(items[mode]) - cnt, search_url)
@@ -107,6 +116,18 @@ class PiSexyProvider(generic.TorrentProvider):
             results = self._sort_seeding(mode, results + items[mode])
 
         return results
+
+    def get_data(self, url):
+        result = None
+        html = self.get_url(url, timeout=90)
+        if self.should_skip():
+            return result
+
+        try:
+            result = self._link(re.findall(r'(?i)"([^"]*?download\.php[^"]+?&(?!pimp)[^"]*)"', html)[0])
+        except IndexError:
+            logger.log('Failed no torrent in response', logger.DEBUG)
+        return result
 
 
 provider = PiSexyProvider()

@@ -1,29 +1,39 @@
+/** @namespace $.SickGear.Root */
+/** @namespace config.sortArticle */
+/** @namespace config.resultsSortby */
 $(document).ready(function () {
+
+	function htmlFlag(lang) {
+		return ' class="flag" style="background-image:url(' + $.SickGear.Root + '/images/flags/' + lang + '.png)"'
+	}
 
 	function populateLangSelect() {
 		if (!$('#nameToSearch').length)
 			return;
 
-		if (1 >= $('#indexerLangSelect').find('option').length) {
+		if (1 >= $('#infosrc-lang-select').find('option').length) {
 
-			$.getJSON(sbRoot + '/home/addShows/getIndexerLanguages', {}, function (data) {
+			$.getJSON(sbRoot + '/add-shows/get-infosrc-languages', {}, function (data) {
 
-				var resultStr = '',
+				var resultStr = '', flag,
 					selected = ' selected="selected"',
-					elIndexerLang = $('#indexerLangSelect');
+					elInfosrcLang = $('#infosrc-lang-select');
 
 				if (0 === data.results.length) {
-					resultStr = '<option value="en"' + selected + '>en</option>';
+					resultStr = '<option value="en"' + selected + '>&gt; en</option>';
 				} else {
 					$.each(data.results, function (index, obj) {
+						flag = htmlFlag(obj);
 						resultStr += '<option value="' + obj + '"'
-							+ ('' == resultStr ? selected : '')
-							+ '>' + obj + '</option>';
+							+ ('' === resultStr
+								? flag.replace('"flag', '"flag selected-text') + selected + '>&gt; '
+								: flag + '>')
+							+ obj + '</option>';
 					});
 				}
 
-				elIndexerLang.html(resultStr);
-				elIndexerLang.change(function () {
+				elInfosrcLang.html(resultStr);
+				elInfosrcLang.change(function () {
 					searchIndexers();
 				});
 			});
@@ -47,83 +57,205 @@ $(document).ready(function () {
 		if (!elNameToSearch.val().length)
 			return;
 
+		$('#more-results').hide();
+
 		if (searchRequestXhr)
 			searchRequestXhr.abort();
 
-		var elTvDatabase = $('#providedIndexer'),
-			elIndexerLang = $('#indexerLangSelect');
+		var elTvDatabase = $('#provided-tvid'),
+			elInfosrcLang = $('#infosrc-lang-select'),
+			tvsrcName = elTvDatabase.find('option:selected').text(),
+			tvSearchSrc = 0 < tvsrcName.length ? ' on ' + tvsrcName : '';
 
-		$('#searchResults').empty().html('<img id="searchingAnim" src="' + sbRoot + '/images/loading32' + themeSpinner + '.gif" height="32" width="32" />'
+		$('#search-results').empty().html('<img id="searchingAnim" src="' + sbRoot + '/images/loading32' + themeSpinner + '.gif" height="32" width="32" />'
 			+ ' searching <span class="boldest">' + cleanseText(elNameToSearch.val(), !0) + '</span>'
-			+ ' on ' + elTvDatabase.find('option:selected').text() + ' in ' + elIndexerLang.val()
+			+ tvSearchSrc + ' in ' + elInfosrcLang.val()
 			+ '...');
 
 		searchRequestXhr = $.ajax({
-			url: sbRoot + '/home/addShows/searchIndexersForShowName',
+			url: sbRoot + '/add-shows/search-tvinfo-for-showname',
 			data: {
 				'search_term': cleanseText(elNameToSearch.val(), !1),
-				'lang': elIndexerLang.val(),
-				'indexer': elTvDatabase.val()
+				'lang': elInfosrcLang.val(),
+				'search_tvid': elTvDatabase.val()
 			},
 			timeout: parseInt($('#indexer_timeout').val(), 10) * parseInt($('#indexer_count').val(), 2) * 1000 + 15000,
 			dataType: 'json',
 			error: function () {
-				$('#searchResults').empty().html('search timed out, try again or try another database');
+				$('#search-results').empty().html('search timed out, try again in a few mins.');
 			},
 			success: function (data) {
-				var resultStr = '', checked = '', rowType, row = 0;
+				var resultStr = '', attrs = '', checked = !1, rowType, row = 0, srcState = '',
+					resultItem, resultStrBuffer = '', nBufferSize = 20, nBuffer = 0, nAll = 0;
 
-				if (0 === data.results.length) {
+				if (null === data.results || 0 === data.results.length) {
 					resultStr += '<span class="boldest">Sorry, no results found. Try a different search.</span>';
 				} else {
-					var idxSrcDB = 0, idxSrcDBId = 1, idxSrcUrl = 2, idxShowID = 3, idxTitle = 4, idxTitleHtml = 5,
-						idxDate = 6, idxNetwork = 7, idxGenres = 8, idxOverview = 9;
-					$.each(data.results, function (index, obj) {
-						checked = (0 == row ? ' checked' : '');
-						rowType = (0 == row % 2 ? '' : ' class="alt"');
+					var result = {
+						SrcName: 0, isInDB: 1, SrcId: 2, SrcDBId: 3, SrcUrl: 4, ShowID: 5, Title: 6, TitleHtml: 7,
+						Aired: 8, Network: 9, Genre: 10, Overview: 11, RelSort: 12, NewestAired: 13, OldestAired: 14, AzSort: 15 , ZaSort: 16, ImgUrl: 17
+					};
+					$.each(data.results, function (index, item) {
+						attrs = (!1 !== item[result.isInDB] ? ' disabled="disabled"' : (!0 === checked ? '' : ' checked'));
+						checked = (' checked' === attrs) ? !0 : checked;
+						rowType = (0 == row % 2 ? '' : ' alt');
 						row++;
 
-						var display_show_name = cleanseText(obj[idxTitle], !0), showstartdate = '';
+						var displayShowName = cleanseText(item[result.Title], !0), showstartdate = '';
 
-						if (null !== obj[idxDate]) {
-							var startDate = new Date(obj[idxDate]);
+						if (null !== item[result.Aired]) {
+							var startDate = new Date(item[result.Aired]);
 							var today = new Date();
 							showstartdate = '&nbsp;<span class="stepone-result-date">('
 								+ (startDate > today ? 'will debut' : 'started')
-								+ ': ' + obj[idxDate] + ')</span>';
+								+ ': ' + item[result.Aired] + ')</span>';
 						}
-						resultStr += '<div' + rowType + '>'
-							+ '<input id="whichSeries" type="radio"'
+
+						srcState = [
+							null === item[result.SrcName] ? '' : item[result.SrcName],
+							!1 === item[result.isInDB] ? '' : '<span class="exists-db"><a href="' + sbRoot + item[result.isInDB] + '" target="_blank">exists in db</a></span>']
+							.join(' - ').replace(/(^[\s-]+|[\s-]+$)/, '');
+						resultItem = '<div class="results-item' + rowType + '" data-indb="' +  (!1 === item[result.isInDB] ? '' : '1') + '" data-sort-rel="' + item[result.RelSort] + '" data-sort-newest="' + item[result.NewestAired] + '" data-sort-oldest="' + item[result.OldestAired] + '" data-sort-az="' + item[result.AzSort] + '" data-sort-za="' + item[result.ZaSort] + '">'
+							+ '<input id="which_series" type="radio"'
 							+ ' class="stepone-result-radio"'
-							+ ' title="Add show <span style=\'color: rgb(66, 139, 202)\'>' + display_show_name + '</span>"'
-							+ ' name="whichSeries"'
-							+ ' value="' + cleanseText([obj[idxSrcDBId], obj[idxSrcDB], obj[idxShowID], obj[idxTitle]].join('|'), !0) + '"'
-							+ checked
+							+ (!1 === item[result.isInDB]
+								? ' title="Add show <span style=\'color: rgb(66, 139, 202)\'>' + displayShowName + '</span>"'
+								: ' title="Show exists in DB,<br><span style=\'font-weight:700\'>selection not possible</span>"')
+							+ ' name="which_series"'
+							+ ' value="' + cleanseText([item[result.SrcDBId], item[result.SrcName], item[result.ShowID], item[result.Title]].join('|'), !0) + '"'
+							+ attrs
 							+ ' />'
 							+ '<a'
 							+ ' class="stepone-result-title"'
-							+ ' title="<div style=\'color: rgb(66, 139, 202)\'>' + cleanseText(obj[idxTitleHtml], !0) + '</div>'
-							+ (0 < obj[idxGenres].length ? '<div style=\'font-weight:bold\'>(<em>' + obj[idxGenres] + '</em>)</div>' : '')
-							+ (0 < obj[idxNetwork].length ? '<div style=\'font-weight:bold;font-size:0.9em;color:#888\'><em>' + obj[idxNetwork] + '</em></div>' : '')
-							+ (0 < obj[idxOverview].length ? '<p style=\'margin:0 0 2px\'>' + obj[idxOverview] + '</p>' : '')
-							+ '<span style=\'float:right\'>Click for more</span>'
+							+ ' title="<div style=\'color: rgb(66, 139, 202)\'>' + cleanseText(item[result.TitleHtml], !0) + '</div>'
+							+ (0 < item[result.Genre].length ? '<div style=\'font-weight:bold\'>(<em>' + item[result.Genre] + '</em>)</div>' : '')
+							+ (0 < item[result.Network].length ? '<div style=\'font-weight:bold;font-size:0.9em;color:#888\'><em>' + item[result.Network] + '</em></div>' : '')
+							+ '<img style=\'max-height:150px;float:right;margin-left:3px\' src=\'/' + item[result.ImgUrl] + '\'>'
+							+ (0 < item[result.Overview].length ? '<p style=\'margin:0 0 2px\'>' + item[result.Overview] + '</p>' : '')
+							+ '<span style=\'float:right;clear:both\'>Click for more</span>'
 							+ '"'
-							+ ' href="' + anonURL + obj[idxSrcUrl] + obj[idxShowID] + ((data.langid && '' != data.langid) ? '&lid=' + data.langid : '') + '"'
-							+ ' onclick="window.open(this.href, \'_blank\'); return false;"'
-							+ '>' + display_show_name + '</a>'
+							+ ' href="' + anonURL + item[result.SrcUrl] + ((data.langid && '' != data.langid) ? '&lid=' + data.langid : '') + '"'
+							+ ' onclick="window.open(this.href, \'_blank\'); return !1;"'
+							+ '>' + (config.sortArticle ? displayShowName : displayShowName.replace(/^((?:A(?!\s+to)n?)|The)(\s)+(.*)/i, '$3$2<span class="article">($1)</span>')) + '</a>'
 							+ showstartdate
-							+ (null == obj[idxSrcDB] ? ''
-								: '&nbsp;<span class="stepone-result-db grey-text">' + '[' + obj[idxSrcDB] + ']' + '</span>')
+							+ ('' === srcState ? ''
+								: '&nbsp;<span class="stepone-result-db grey-text">' + '[' + srcState + ']' + '</span>')
 							+ '</div>' + "\n";
+						if (nBuffer < nBufferSize || item[result.isInDB]) {
+							resultStr += resultItem;
+							if (!1 === item[result.isInDB])
+								nBuffer++;
+						} else {
+							resultStrBuffer += resultItem;
+						}
+						nAll++;
 					});
 				}
-				$('#searchResults').html(
+				var selAttr = 'selected="selected" ',
+					selClass = 'selected-text',
+					classAttrSel = 'class="' + selClass + '" ',
+					useBuffer = nBufferSize < nAll,
+					defSortby = /^az/.test(config.resultsSortby) || /^za/.test(config.resultsSortby) || /^newest/.test(config.resultsSortby) || /^oldest/.test(config.resultsSortby) ? '': classAttrSel + selAttr;
+
+				$('#search-results').html(
 					'<fieldset>' + "\n" + '<legend class="legendStep" style="margin-bottom: 15px">'
-						+ (0 < row ? row : 'No')
-						+ ' search result' + (1 == row ? '' : 's') + '...</legend>' + "\n"
+						+ '<span id="count"></span>'
+						+ '<span style="float:right;height:32px;line-height:1">'
+						+ '<select id="results-sortby" class="form-control form-control-inline input-sm">'
+						+ '<optgroup label="Sort by">'
+						+ '<option ' + (/^az/.test(config.resultsSortby) ? classAttrSel + selAttr : '') + 'value="az">A to Z</option>'
+						+ '<option ' + (/^za/.test(config.resultsSortby) ? classAttrSel + selAttr : '') + 'value="za">Z to A</option>'
+						+ '<option ' + (/^newest/.test(config.resultsSortby) ? classAttrSel + selAttr : '') + 'value="newest">Newest aired</option>'
+						+ '<option ' + (/^oldest/.test(config.resultsSortby) ? classAttrSel + selAttr : '') + 'value="oldest">Oldest aired</option>'
+						+ '<option ' + defSortby + 'value="rel">Relevancy</option>'
+						+ '</optgroup><optgroup label="With...">'
+						+ '<option ' + (!/notop$/.test(config.resultsSortby) ? classAttrSel : '') + 'value="ontop">Exists on top</option>'
+						+ '<option ' + (/notop$/.test(config.resultsSortby) ? classAttrSel : '') + 'value="notop">Exists in mix</option>'
+						+ '</optgroup></select></span>'
+						+ '</legend>' + "\n"
+						+ '<div id="holder">'
 						+ resultStr
+						+ '</div>'
 						+ '</fieldset>'
 					);
+
+				if (useBuffer) {
+					$('#search-results-buffer').html(resultStrBuffer);
+					$('#more-results').show();
+					$('#more-results a').on('click', function(e, d) {
+						e.preventDefault();
+						$('#more-results').hide();
+						$('#search-results #count').text(nAll + ' search result' + (1 === nAll ? '' : 's') + '...');
+						$('#search-results-buffer .results-item').appendTo('#holder');
+						container$.isotope( 'reloadItems' ).isotope(
+							{sortBy: $('#results-sortby').find('option:not([value$="top"]).selected-text').val()});
+						myform.loadsection(0);
+					});
+					$('#search-results #count').text((nBuffer + ' / ' + nAll)
+						+ ' search result' + (1 === nBuffer ? '' : 's') + '...');
+				} else {
+					$('#search-results #count').text((0 < nBuffer ? nBuffer + (useBuffer ? ' / ' + nAll : '') : 'No')
+						+ ' search result' + (1 === nAll ? '' : 's') + '...');
+				}
+
+				var container$ = $('#holder'),
+					sortbySelect$ = $('#results-sortby'),
+					reOrder = (function(value){
+						return ($('#results-sortby').find('option[value$="notop"]').hasClass(selClass)
+							? (1000 > value ? value + 1000 : value)
+							: (1000 > value ? value : value - 1000))}),
+					getData = (function(itemElem, sortby){
+						var position = parseInt($(itemElem).attr('data-sort-' + sortby));
+						return (!$(itemElem).attr('data-indb')) ? position : reOrder(position);
+					});
+
+				sortbySelect$.find('.' + selClass).each(function(){
+					$(this).html('> ' + $(this).html());
+				});
+
+				container$.isotope({
+					itemSelector: '.results-item',
+					sortBy: sortbySelect$.find('option:not([value$="top"]).' + selClass).val(),
+					layoutMode: 'masonry',
+					getSortData: {
+						az: function(itemElem){ return getData(itemElem, 'az'); },
+						za: function(itemElem){ return getData(itemElem, 'za'); },
+						newest: function(itemElem){ return getData(itemElem, 'newest'); },
+						oldest: function(itemElem){ return getData(itemElem, 'oldest'); },
+						rel: function(itemElem){ return getData(itemElem, 'rel'); }
+					}
+				}).on('arrangeComplete', function(event, items){
+					$(items).each(function(i, item){
+						if (1 === i % 2){
+							$(item.element).addClass('alt');
+						}
+					});
+				});
+
+				sortbySelect$.on('change', function(){
+					var selectedSort = String($(this).val()), sortby = selectedSort, curSortby$, curSel$, newSel$;
+
+					curSortby$ = $(this).find('option:not([value$="top"])');
+					if (/top$/.test(selectedSort)){
+						sortby = curSortby$.filter('.' + selClass).val();
+						curSortby$ = $(this).find('option[value$="top"]');
+					}
+					curSel$ = curSortby$.filter('.' + selClass);
+					curSel$.html(curSel$.html().replace(/(?:>|&gt;)\s/ , '')).removeClass(selClass);
+
+					newSel$ = $(this).find('option[value$="' + selectedSort + '"]');
+					newSel$.html('&gt; ' + newSel$.html()).addClass(selClass);
+
+					$('.results-item[data-indb="1"]').each(function(){
+						$(this).attr(sortby, reOrder(parseInt($(this).attr(sortby), 10)));
+					});
+					$('.results-item').removeClass('alt');
+					container$.isotope('updateSortData').isotope({sortBy: sortby});
+
+					config.resultsSortby = sortby + ($(this).find('option[value$="notop"]').hasClass(selClass) ? ' notop' : '');
+					$.get(sbRoot + '/config/general/save-result-prefs', {ui_results_sortby: selectedSort});
+				});
+
 				updateSampleText();
 				myform.loadsection(0);
 				$('.stepone-result-radio, .stepone-result-title').each(addQTip);
@@ -140,14 +272,18 @@ $(document).ready(function () {
 		elSearchName.click();
 	}
 
-	$('#addShowButton').click(function () {
-		// if they haven't picked a show don't let them submit
-		if (!$('input:radio[name="whichSeries"]:checked').val()
-			&& !$('input:hidden[name="whichSeries"]').val().length) {
-				alert('You must choose a show to continue');
-				return false;
+	$('#addShowButton, #cancelShowButton').click(function () {
+		if (/cancel/.test(this.id)){
+			$('input[name=cancel_form]').val('1');
+		} else {
+			// if they haven't picked a show don't let them submit
+			if (!$('input:radio[name="which_series"]:checked').val()
+				&& !$('input:hidden[name="which_series"]').val().length) {
+					alert('You must choose a show to continue');
+					return !1;
+			}
+			generate_bwlist();
 		}
-		generate_bwlist();
 		$('#addShowForm').submit();
 	});
 
@@ -156,7 +292,7 @@ $(document).ready(function () {
 		$('#addShowForm').submit();
 	});
 
-	$('#qualityPreset').change(function () {
+	$('#quality-preset').change(function () {
 		myform.loadsection(2);
 	});
 
@@ -166,14 +302,14 @@ $(document).ready(function () {
 	* Visit http://www.dynamicdrive.com/ for this script and 100s more.
 	***********************************************/
 
-	var myform = new FormToWizard({
+	var myform = $.SickGear.myform = new FormToWizard({
 		fieldsetborderwidth: 0,
 		formid: 'addShowForm',
 		revealfx: ['slide', 500],
 		oninit: function () {
 			populateLangSelect();
 			updateSampleText();
-			if ($('input:hidden[name="whichSeries"]').length && $('#fullShowPath').length) {
+			if ($('input:hidden[name="which_series"]').length && $('#fullShowPath').length) {
 				goToStep(3);
 			}
 		}
@@ -190,12 +326,17 @@ $(document).ready(function () {
 	elNameToSearch.focus();
 
 	function updateSampleText() {
+		if (0 === $('#displayText').length) {
+			$('#cancelShowButton').attr('disabled', !1);
+			$('#addShowButton').attr('disabled', 0 === $('#holder').find('.results-item').length);
+			return;
+		}
 		// if something's selected then we have some behavior to figure out
 
-		var show_name = '',
+		var showName = '',
 			sep_char,
-			elRadio = $('input:radio[name="whichSeries"]:checked'),
-			elInput = $('input:hidden[name="whichSeries"]'),
+			elRadio = $('input:radio[name="which_series"]:checked'),
+			elInput = $('input:hidden[name="which_series"]'),
 			elScene = $('#scene'),
 			elRootDirs = $('#rootDirs'),
 			elFullShowPath = $('#fullShowPath'),
@@ -203,17 +344,17 @@ $(document).ready(function () {
 
 		// if they've picked a radio button then use that
 		if (elRadio.length) {
-			show_name = elRadio.val().split('|')[idxWhichTitle];
-			elScene[0].checked = 0 <= show_scene_maps.indexOf(parseInt(elRadio.val().split('|')[idxWhichShowID], 10));
-			$('#scene-maps-found').css('display', elScene.is(':checked') ? 'inline' : 'None');
+			showName = elRadio.val().split('|')[idxWhichTitle];
+			elScene[0].checked = 0 <= showSceneMaps.indexOf(parseInt(elRadio.val().split('|')[idxWhichShowID], 10));
+			$('#scene-maps-found').css('display', elScene.is(':checked') ? 'block' : 'None');
 		}
 		// if we provided a show in the hidden field, use that
 		else if (elInput.length && elInput.val().length) {
-			show_name = $('#providedName').val();
+			showName = $('#provided-show-name').val();
 		}
-		update_bwlist(show_name);
-		var sample_text = '<p>Adding show <span class="show-name">' + cleanseText(show_name, !0) + '</span>'
-			+ ('' == show_name ? 'into<br />' : '<br />into')
+		update_bwlist(showName);
+		var sample_text = '<p>Adding show <span class="show-name">' + cleanseText(showName, !0) + '</span>'
+			+ ('' == showName ? 'into<br />' : '<br />into')
 			+ ' <span class="show-dest">';
 
 		// if we have a root dir selected, figure out the path
@@ -242,8 +383,8 @@ $(document).ready(function () {
 		sample_text += '</span></p>';
 
 		// if we have a show name then sanitize and use it for the dir name
-		if (show_name.length) {
-			$.get(sbRoot + '/home/addShows/sanitizeFileName', {name: cleanseText(show_name, !1)}, function (data) {
+		if (showName.length) {
+			$.get(sbRoot + '/add-shows/generate-show-dir-name', {show_name: cleanseText(showName, !1)}, function (data) {
 				$('#displayText').html(sample_text.replace('||', data));
 			});
 		// if not then it's unknown
@@ -254,18 +395,19 @@ $(document).ready(function () {
 		// also toggle the add show button
 		if ((elRootDirs.find('option:selected').length || (elFullShowPath.length && elFullShowPath.val().length)) &&
 			(elRadio.length) || (elInput.length && elInput.val().length)) {
-			$('#addShowButton').attr('disabled', false);
+			$('#addShowButton').attr('disabled', !1);
 		} else {
-			$('#addShowButton').attr('disabled', true);
+			$('#addShowButton').attr('disabled', !0);
 		}
 	}
 
 	$('#rootDirText').change(updateSampleText);
 
-	$('#searchResults').on('click', '.stepone-result-radio', updateSampleText);
+	$('#search-results').on('click', '.stepone-result-radio', updateSampleText);
 
-	elNameToSearch.keyup(function (event) {
+	elNameToSearch.keydown(function (event) {
 		if (event.keyCode == 13) {
+			event.preventDefault();
 			elSearchName.click();
 		}
 	});
@@ -274,7 +416,7 @@ $(document).ready(function () {
 		$(this).css('cursor', 'help');
 		$(this).qtip({
 			show: {
-				solo: true
+				solo: !0
 			},
 			position: {
 				viewport: $(window),
@@ -286,7 +428,7 @@ $(document).ready(function () {
 			},
 			style: {
 				tip: {
-					corner: true,
+					corner: !0,
 					method: 'polygon'
 				},
 				classes: 'qtip-rounded qtip-bootstrap qtip-shadow ui-tooltip-sb'
@@ -308,7 +450,7 @@ $(document).ready(function () {
 			groupvalue = match[1];
 			groupview = groupvalue + match[2];
 		}
-		option.attr('value', groupvalue);
+		option.val(groupvalue);
 		option.html(groupview);
 		option.appendTo('#pool');
 	}
@@ -320,7 +462,7 @@ $(document).ready(function () {
 		if ($('#anime').prop('checked')) {
 			$('#blackwhitelist').show();
 			if (show_name) {
-				$.getJSON(sbRoot + '/home/fetch_releasegroups', {'show_name': cleanseText(show_name, !1)}, function (data) {
+				$.getJSON(sbRoot + '/home/fetch-releasegroups', {'show_name': cleanseText(show_name, !1)}, function (data) {
 					if ('success' == data['result']) {
 						var groups = [];
 						$.each(data.groups, function (i, group) {

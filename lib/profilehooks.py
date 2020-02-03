@@ -54,7 +54,7 @@ instead of a detailed (but costly) profile.
 Caveats
 
   A thread on python-dev convinced me that hotshot produces bogus numbers.
-  See http://mail.python.org/pipermail/python-dev/2005-November/058264.html
+  See https://mail.python.org/pipermail/python-dev/2005-November/058264.html
 
   I don't know what will happen if a decorated function will try to call
   another decorated function.  All decorators probably need to explicitly
@@ -74,7 +74,7 @@ Caveats
   executed.  For this reason coverage analysis now uses trace.py which is
   slower, but more accurate.
 
-Copyright (c) 2004--2014 Marius Gedminas <marius@pov.lt>
+Copyright (c) 2004--2019 Marius Gedminas <marius@gedmin.as>
 Copyright (c) 2007 Hanno Schlichting
 Copyright (c) 2008 Florian Schulze
 
@@ -100,23 +100,27 @@ Released under the MIT licence since December 2006:
 
 (Previously it was distributed under the GNU General Public Licence.)
 """
+from __future__ import print_function
 
 __author__ = "Marius Gedminas <marius@gedmin.as>"
-__copyright__ = "Copyright 2004-2015 Marius Gedminas and contributors"
+__copyright__ = "Copyright 2004-2019 Marius Gedminas and contributors"
 __license__ = "MIT"
-__version__ = '1.8.2.dev0'
-__date__ = "2015-11-21"
-
+__version__ = '1.11.0'
+__date__ = "2019-04-23"
 
 import atexit
 import inspect
-import sys
-import re
+import logging
 import os
+import re
+import sys
 
 # For profiling
 from profile import Profile
 import pstats
+
+# For timecall
+import timeit
 
 # For hotshot profiling (inaccurate!)
 try:
@@ -127,6 +131,9 @@ except ImportError:
 
 # For trace.py coverage
 import trace
+import dis
+import token
+import tokenize
 
 # For hotshot coverage (inaccurate!; uses undocumented APIs; might break)
 if hotshot is not None:
@@ -138,9 +145,6 @@ try:
     import cProfile
 except ImportError:
     cProfile = None
-
-# For timecall
-import time
 
 
 # registry of available profilers
@@ -225,7 +229,7 @@ def profile(fn=None, skip=0, filename=None, immediate=False, dirs=False,
             break
     else:
         raise ValueError('only these profilers are available: %s'
-                             % ', '.join(sorted(AVAILABLE_PROFILERS)))
+                         % ', '.join(sorted(AVAILABLE_PROFILERS)))
     fp = profiler_class(fn, skip=skip, filename=filename,
                         immediate=immediate, dirs=dirs,
                         sort=sort, entries=entries, stdout=stdout)
@@ -316,7 +320,7 @@ class FuncProfile(object):
         self.fn = fn
         self.skip = skip
         self.filename = filename
-        self.immediate = immediate
+        self._immediate = immediate
         self.stdout = stdout
         self.dirs = dirs
         self.sort = sort or ('cumulative', 'time', 'calls')
@@ -324,7 +328,12 @@ class FuncProfile(object):
             self.sort = (self.sort, )
         self.entries = entries
         self.reset_stats()
-        atexit.register(self.atexit)
+        if not self.immediate:
+            atexit.register(self.atexit)
+
+    @property
+    def immediate(self):
+        return self._immediate
 
     def __call__(self, *args, **kw):
         """Profile a singe call to the function."""
@@ -384,9 +393,7 @@ class FuncProfile(object):
 
         This function is registered as an atexit hook.
         """
-        # XXX: uh, why even register this as an atexit hook if immediate is True?
-        if not self.immediate:
-            self.print_stats()
+        self.print_stats()
 
 
 AVAILABLE_PROFILERS['profile'] = FuncProfile
@@ -500,7 +507,7 @@ if hotshot is not None:
             old_trace = sys.gettrace()
             try:
                 return self.profiler.runcall(self.fn, args, kw)
-            finally: # pragma: nocover
+            finally:  # pragma: nocover
                 sys.settrace(old_trace)
 
         def atexit(self):
@@ -525,10 +532,11 @@ if hotshot is not None:
                 if what == hotshot.log.LINE:
                     fs.mark(lineno)
                 if what == hotshot.log.ENTER:
-                    # hotshot gives us the line number of the function definition
-                    # and never gives us a LINE event for the first statement in
-                    # a function, so if we didn't perform this mapping, the first
-                    # statement would be marked as never executed
+                    # hotshot gives us the line number of the function
+                    # definition and never gives us a LINE event for the first
+                    # statement in a function, so if we didn't perform this
+                    # mapping, the first statement would be marked as never
+                    # executed
                     if lineno == fs.firstlineno:
                         lineno = fs.firstcodelineno
                     fs.mark(lineno)
@@ -573,13 +581,13 @@ class TraceFuncCoverage:
     def __call__(self, *args, **kw):
         """Profile a singe call to the function."""
         self.ncalls += 1
-        if TraceFuncCoverage.tracing: # pragma: nocover
+        if TraceFuncCoverage.tracing:  # pragma: nocover
             return self.fn(*args, **kw)
         old_trace = sys.gettrace()
         try:
             TraceFuncCoverage.tracing = True
             return self.tracer.runfunc(self.fn, *args, **kw)
-        finally: # pragma: nocover
+        finally:  # pragma: nocover
             sys.settrace(old_trace)
             TraceFuncCoverage.tracing = False
 
@@ -629,8 +637,9 @@ class FuncSource:
         """Mark all executable source lines in fn as executed 0 times."""
         if self.filename is None:
             return
-        strs = trace.find_strings(self.filename)
-        lines = trace.find_lines_from_code(self.fn.__code__, strs)
+        strs = self._find_docstrings(self.filename)
+        lines = {ln for off, ln in dis.findlinestarts(self.fn.__code__)
+                 if ln not in strs}
         for lineno in lines:
             self.sourcelines.setdefault(lineno, 0)
         if lines:
@@ -638,6 +647,19 @@ class FuncSource:
         else:  # pragma: nocover
             # This branch cannot be reached, I'm just being paranoid.
             self.firstcodelineno = self.firstlineno
+
+    def _find_docstrings(self, filename):
+        # A replacement for trace.find_strings() which was deprecated in
+        # Python 3.2 and removed in 3.6.
+        strs = set()
+        prev = token.INDENT  # so module docstring is detected as docstring
+        with open(filename) as f:
+            tokens = tokenize.generate_tokens(f.readline)
+            for ttype, tstr, start, end, line in tokens:
+                if ttype == token.STRING and prev == token.INDENT:
+                    strs.update(range(start[0], end[0] + 1))
+                prev = ttype
+        return strs
 
     def mark(self, lineno, count=1):
         """Mark a given source line as executed count times.
@@ -682,7 +704,10 @@ class FuncSource:
         return ''.join(lines)
 
 
-def timecall(fn=None, immediate=True, timer=None):
+def timecall(
+        fn=None, immediate=True, timer=None,
+        log_name=None, log_level=logging.DEBUG,
+):
     """Wrap `fn` and print its execution time.
 
     Example::
@@ -694,24 +719,37 @@ def timecall(fn=None, immediate=True, timer=None):
         somefunc(2, 3)
 
     will print the time taken by somefunc on every call.  If you want just
-    a summary at program termination, use
+    a summary at program termination, use ::
 
         @timecall(immediate=False)
 
-    You can also choose a timing method other than the default ``time.time()``,
-    e.g.:
+    You can also choose a timing method other than the default
+    ``timeit.default_timer()``, e.g.::
 
         @timecall(timer=time.clock)
+
+    You can also log the output to a logger by specifying the name and level
+    of the logger to use, eg:
+
+        @timecall(immediate=True,
+                  log_name='profile_log',
+                  log_level=logging.DEBUG)
 
     """
     if fn is None:  # @timecall() syntax -- we are a decorator maker
         def decorator(fn):
-            return timecall(fn, immediate=immediate, timer=timer)
+            return timecall(
+                fn, immediate=immediate, timer=timer,
+                log_name=log_name, log_level=log_level,
+            )
         return decorator
     # @timecall syntax -- we are a decorator.
     if timer is None:
-        timer = time.time
-    fp = FuncTimer(fn, immediate=immediate, timer=timer)
+        timer = timeit.default_timer
+    fp = FuncTimer(
+        fn, immediate=immediate, timer=timer,
+        log_name=log_name, log_level=log_level,
+    )
     # We cannot return fp or fp.__call__ directly as that would break method
     # definitions, instead we need to return a plain function.
 
@@ -726,7 +764,14 @@ def timecall(fn=None, immediate=True, timer=None):
 
 class FuncTimer(object):
 
-    def __init__(self, fn, immediate, timer):
+    def __init__(
+            self, fn, immediate, timer,
+            log_name=None, log_level=logging.DEBUG,
+    ):
+        self.logger = None
+        if log_name:
+            self.logger = logging.getLogger(log_name)
+        self.log_level = log_level
         self.fn = fn
         self.ncalls = 0
         self.totaltime = 0
@@ -740,8 +785,8 @@ class FuncTimer(object):
         fn = self.fn
         timer = self.timer
         self.ncalls += 1
+        start = timer()
         try:
-            start = timer()
             return fn(*args, **kw)
         finally:
             duration = timer() - start
@@ -750,10 +795,14 @@ class FuncTimer(object):
                 funcname = fn.__name__
                 filename = fn.__code__.co_filename
                 lineno = fn.__code__.co_firstlineno
-                sys.stderr.write("\n  %s (%s:%s):\n    %.3f seconds\n\n" % (
-                    funcname, filename, lineno, duration
-                ))
-                sys.stderr.flush()
+                message = "%s (%s:%s):\n    %.3f seconds\n\n" % (
+                    funcname, filename, lineno, duration,
+                )
+                if self.logger:
+                    self.logger.log(self.log_level, message)
+                else:
+                    sys.stderr.write("\n  " + message)
+                    sys.stderr.flush()
 
     def atexit(self):
         if not self.ncalls:
@@ -761,11 +810,15 @@ class FuncTimer(object):
         funcname = self.fn.__name__
         filename = self.fn.__code__.co_filename
         lineno = self.fn.__code__.co_firstlineno
-        print("\n  %s (%s:%s):\n"
-              "    %d calls, %.3f seconds (%.3f seconds per call)\n" % (
-                  funcname, filename, lineno, self.ncalls,
-                  self.totaltime, self.totaltime / self.ncalls)
-              )
+        message = "\n  %s (%s:%s):\n"\
+            "    %d calls, %.3f seconds (%.3f seconds per call)\n" % (
+                funcname, filename, lineno, self.ncalls,
+                self.totaltime, self.totaltime / self.ncalls)
+        if self.logger:
+            self.logger.log(self.log_level, message)
+        else:
+            print(message)
+
 
 if __name__ == '__main__':
 

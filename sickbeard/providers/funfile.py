@@ -20,10 +20,12 @@ import time
 import traceback
 
 from . import generic
-from sickbeard import logger
-from sickbeard.bs4_parser import BS4Parser
-from sickbeard.helpers import tryInt
-from lib.unidecode import unidecode
+from .. import logger
+from ..helpers import try_int
+from bs4_parser import BS4Parser
+
+from _23 import unidecode
+from six import iteritems
 
 
 class FunFileProvider(generic.TorrentProvider):
@@ -34,8 +36,7 @@ class FunFileProvider(generic.TorrentProvider):
         self.url_base = 'https://www.funfile.org/'
         self.urls = {'config_provider_home_uri': self.url_base,
                      'login_action': self.url_base + 'login.php',
-                     'search': self.url_base + 'browse.php?%s&search=%s&incldead=0&showspam=1',
-                     'get': self.url_base + '%s'}
+                     'search': self.url_base + 'browse.php?%s&search=%s&incldead=0&showspam=1'}
 
         self.categories = {'shows': [7], 'anime': [44]}
 
@@ -48,7 +49,7 @@ class FunFileProvider(generic.TorrentProvider):
         time.sleep(2.5)
         return super(FunFileProvider, self)._authorised(
             logged_in=(lambda y=None: all(
-                [None is not self.session.cookies.get(x, domain='.funfile.org') for x in 'uid', 'pass'])),
+                [None is not self.session.cookies.get(x, domain='.funfile.org') for x in ('uid', 'pass')])),
             post_params={'form_tmpl': True}, timeout=self.url_timeout)
 
     def _search_provider(self, search_params, **kwargs):
@@ -59,29 +60,31 @@ class FunFileProvider(generic.TorrentProvider):
 
         items = {'Cache': [], 'Season': [], 'Episode': [], 'Propers': []}
 
-        rc = dict((k, re.compile('(?i)' + v)) for (k, v) in {'info': 'detail', 'get': 'download'}.items())
-        for mode in search_params.keys():
+        rc = dict([(k, re.compile('(?i)' + v)) for (k, v) in iteritems({'info': 'detail', 'get': 'download'})])
+        for mode in search_params:
             rc['cats'] = re.compile('(?i)cat=(?:%s)' % self._categories_string(mode, template='', delimiter='|'))
             for search_string in search_params[mode]:
-                search_string = isinstance(search_string, unicode) and unidecode(search_string) or search_string
+                search_string = unidecode(search_string)
                 search_url = self.urls['search'] % (self._categories_string(mode), search_string)
 
                 html = self.get_url(search_url, timeout=self.url_timeout)
+                if self.should_skip():
+                    return results
 
                 cnt = len(items[mode])
                 try:
                     if not html or self._has_no_results(html):
                         raise generic.HaltParseException
 
-                    with BS4Parser(html, features=['html5lib', 'permissive']) as soup:
-                        torrent_table = soup.find('td', class_='colhead').find_parent('table')
-                        torrent_rows = [] if not torrent_table else torrent_table.find_all('tr')
+                    with BS4Parser(html) as soup:
+                        tbl = soup.find('td', class_='colhead').find_parent('table')
+                        tbl_rows = [] if not tbl else tbl.find_all('tr')
 
-                        if 2 > len(torrent_rows):
+                        if 2 > len(tbl_rows):
                             raise generic.HaltParseException
 
                         head = None
-                        for tr in torrent_rows[1:]:
+                        for tr in tbl_rows[1:]:
                             cells = tr.find_all('td')
                             info = tr.find('a', href=rc['info'])
                             if 5 > len(cells) or not info:
@@ -89,9 +92,9 @@ class FunFileProvider(generic.TorrentProvider):
                             try:
                                 head = head if None is not head else self._header_row(
                                     tr, {'seed': r'(?:up\.gif|seed|s/l)', 'leech': r'(?:down\.gif|leech|peers)'})
-                                seeders, leechers, size = [tryInt(n, n) for n in [
-                                    cells[head[x]].get_text().strip() for x in 'seed', 'leech', 'size']]
-                                if None is tr.find('a', href=rc['cats']) or self._peers_fail(mode, seeders, leechers):
+                                seeders, leechers, size = [try_int(n, n) for n in [
+                                    cells[head[x]].get_text().strip() for x in ('seed', 'leech', 'size')]]
+                                if None is tr.find('a', href=rc['cats']) or self._reject_item(seeders, leechers):
                                     continue
 
                                 title = (info.attrs.get('title') or info.get_text()).strip()
@@ -104,7 +107,7 @@ class FunFileProvider(generic.TorrentProvider):
 
                 except (generic.HaltParseException, AttributeError):
                     pass
-                except (StandardError, Exception):
+                except (BaseException, Exception):
                     logger.log(u'Failed to parse. Traceback: %s' % traceback.format_exc(), logger.ERROR)
 
                 self._log_search(mode, len(items[mode]) - cnt, search_url)

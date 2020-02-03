@@ -15,20 +15,20 @@
 # You should have received a copy of the GNU General Public License
 # along with SickGear.  If not, see <http://www.gnu.org/licenses/>.
 
-try:
-    from collections import OrderedDict
-except ImportError:
-    from requests.compat import OrderedDict
+from collections import OrderedDict
+
 import re
 import traceback
 
 from . import generic
-from sickbeard import logger
-from sickbeard.bs4_parser import BS4Parser
-from sickbeard.helpers import tryInt
-from lib.unidecode import unidecode
+from .. import logger
+from ..helpers import try_int
+from bs4_parser import BS4Parser
 
-FLTAG = '</a>\s+<img[^>]+%s[^<]+<br'
+from _23 import unidecode
+from six import iteritems
+
+FLTAG = r'</a>\s+<img[^>]+%s[^<]+<br'
 
 
 class FanoProvider(generic.TorrentProvider):
@@ -38,7 +38,7 @@ class FanoProvider(generic.TorrentProvider):
 
         self.url_base = 'https://www.fano.in/'
         self.urls = {'config_provider_home_uri': self.url_base,
-                     'login_action': self.url_base + 'login.php', 'get': self.url_base + '%s',
+                     'login_action': self.url_base + 'login.php',
                      'search': self.url_base + 'browse_old.php?search=%s&%s&incldead=0'}
 
         self.categories = {'Season': [49], 'Episode': [6, 23, 32, 35], 'anime': [27]}
@@ -64,8 +64,8 @@ class FanoProvider(generic.TorrentProvider):
 
         items = {'Cache': [], 'Season': [], 'Episode': [], 'Propers': []}
 
-        rc = dict((k, re.compile('(?i)' + v))
-                  for (k, v) in {'abd': '(\d{4}(?:[.]\d{2}){2})', 'info': 'details', 'get': 'download'}.items())
+        rc = dict([(k, re.compile('(?i)' + v))
+                   for (k, v) in iteritems({'abd': r'(\d{4}(?:[.]\d{2}){2})', 'info': 'details', 'get': 'download'})])
         log = ''
         if self.filter:
             non_marked = 'f0' in self.filter
@@ -75,30 +75,32 @@ class FanoProvider(generic.TorrentProvider):
             rc['filter'] = re.compile('(?i)(%s)' % '|'.join(
                 [self.may_filter[f][2] for f in filters if self.may_filter[f][1]]))
             log = '%sing (%s) ' % (('keep', 'skipp')[non_marked], ', '.join([self.may_filter[f][0] for f in filters]))
-        for mode in search_params.keys():
+        for mode in search_params:
             rc['cats'] = re.compile('(?i)cat=(?:%s)' % self._categories_string(mode, template='', delimiter='|'))
             for search_string in search_params[mode]:
-                search_string = isinstance(search_string, unicode) and unidecode(search_string) or search_string
+                search_string = unidecode(search_string)
                 search_string = '+'.join(rc['abd'].sub(r'%22\1%22', search_string).split())
                 search_url = self.urls['search'] % (search_string, self._categories_string(mode))
 
                 html = self.get_url(search_url)
+                if self.should_skip():
+                    return results
 
                 cnt = len(items[mode])
                 try:
                     if not html or self._has_no_results(html):
                         raise generic.HaltParseException
 
-                    with BS4Parser(html, features=['html5lib', 'permissive']) as soup:
-                        torrent_table = soup.find('table', id='line')
-                        torrent_rows = [] if not torrent_table else torrent_table.find_all('tr')
+                    with BS4Parser(html, parse_only=dict(table={'id': 'line'})) as tbl:
+                        tbl_rows = [] if not tbl else tbl.find_all('tr')
 
-                        if 2 > len(torrent_rows):
+                        if 2 > len(tbl_rows):
                             raise generic.HaltParseException
 
                         head = None
-                        for tr in torrent_rows[1:]:
+                        for tr in tbl_rows[1:]:
                             cells = tr.find_all('td')
+                            # noinspection PyUnboundLocalVariable
                             if (5 > len(cells)
                                 or (any(self.filter)
                                     and ((non_marked and rc['filter'].search(str(tr)))
@@ -106,9 +108,9 @@ class FanoProvider(generic.TorrentProvider):
                                 continue
                             try:
                                 head = head if None is not head else self._header_row(tr)
-                                seeders, leechers, size = [tryInt(n, n) for n in [
-                                    cells[head[x]].get_text().strip() for x in 'seed', 'leech', 'size']]
-                                if self._peers_fail(mode, seeders, leechers) or not tr.find('a', href=rc['cats']):
+                                seeders, leechers, size = [try_int(n, n) for n in [
+                                    cells[head[x]].get_text().strip() for x in ('seed', 'leech', 'size')]]
+                                if not tr.find('a', href=rc['cats']) or self._reject_item(seeders, leechers):
                                     continue
 
                                 title = tr.find('a', href=rc['info']).get_text().strip()
@@ -121,7 +123,7 @@ class FanoProvider(generic.TorrentProvider):
 
                 except generic.HaltParseException:
                     pass
-                except (StandardError, Exception):
+                except (BaseException, Exception):
                     logger.log(u'Failed to parse. Traceback: %s' % traceback.format_exc(), logger.ERROR)
 
                 self._log_search(mode, len(items[mode]) - cnt, log + search_url)

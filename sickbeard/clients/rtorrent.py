@@ -1,5 +1,3 @@
-# Author: jkaberg <joel.kaberg@gmail.com>, based on fuzemans work (https://github.com/RuudBurger/CouchPotatoServer/blob/develop/couchpotato/core/downloaders/rtorrent/main.py)
-# URL: http://code.google.com/p/sickbeard/
 #
 # This file is part of SickGear.
 #
@@ -16,10 +14,11 @@
 # You should have received a copy of the GNU General Public License
 # along with SickGear.  If not, see <http://www.gnu.org/licenses/>.
 
-import xmlrpclib
-from sickbeard import helpers, TORRENT_LABEL, TORRENT_PATH
-from sickbeard.clients.generic import GenericClient
+from .generic import GenericClient
+from .. import logger
+import sickbeard
 from lib.rtorrent import RTorrent
+from lib.rtorrent.compat import xmlrpclib
 
 
 class RtorrentAPI(GenericClient):
@@ -30,60 +29,48 @@ class RtorrentAPI(GenericClient):
 
         super(RtorrentAPI, self).__init__('rTorrent', host, username, password)
 
-        # self.url = self.host
+    def _add_torrent_uri(self, search_result):
 
-    def _get_auth(self):
+        return search_result and self._add_torrent('magnet', search_result) or False
 
-        self.auth = None
-        if self.host:
-            try:
-                if self.host and self.host.startswith('scgi:'):
-                    self.username = self.password = None
-                self.auth = RTorrent(self.host, self.username, self.password, True)
-            except (AssertionError, xmlrpclib.ProtocolError) as e:
-                pass
+    def _add_torrent_file(self, search_result):
 
-        return self.auth
+        return search_result and self._add_torrent('file', search_result) or False
 
-    def _add_torrent(self, cmd, **kwargs):
+    def _add_torrent(self, cmd, data):
         torrent = None
 
         if self.auth:
             try:
+                if self.auth.has_local_id(data.hash):
+                    logger.log('%s: Item already exists %s' % (self.name, data.name), logger.WARNING)
+                    raise
+
+                custom_var = (1, sickbeard.TORRENT_LABEL_VAR or '')[0 <= sickbeard.TORRENT_LABEL_VAR <= 5]
+                params = {
+                    'start': not sickbeard.TORRENT_PAUSED,
+                    'extra': ([], ['d.set_custom%s=%s' % (custom_var, sickbeard.TORRENT_LABEL)])[
+                                 any([sickbeard.TORRENT_LABEL])] +
+                             ([], ['d.set_directory=%s' % sickbeard.TORRENT_PATH])[
+                                 any([sickbeard.TORRENT_PATH])] or None}
                 # Send magnet to rTorrent
                 if 'file' == cmd:
-                    torrent = self.auth.load_torrent(kwargs['file'])
+                    torrent = self.auth.load_torrent(data.content, **params)
                 elif 'magnet' == cmd:
-                    torrent = self.auth.load_magnet(kwargs['uri'], kwargs['btih'])
+                    torrent = self.auth.load_magnet(data.url, data.hash, **params)
 
-                if torrent:
+                if torrent and sickbeard.TORRENT_LABEL:
+                    label = torrent.get_custom(custom_var)
+                    if sickbeard.TORRENT_LABEL != label:
+                        logger.log('%s: could not change custom%s label value \'%s\' to \'%s\' for %s' % (
+                            self.name, custom_var, label, sickbeard.TORRENT_LABEL, torrent.name), logger.WARNING)
 
-                    if TORRENT_LABEL:
-                        torrent.set_custom(1, TORRENT_LABEL)
-
-                    if TORRENT_PATH:
-                        torrent.set_directory(TORRENT_PATH)
-
-                    torrent.start()
-
-            except (StandardError, Exception) as e:
+            except (BaseException, Exception):
                 pass
 
         return any([torrent])
 
-    def _add_torrent_file(self, result):
-
-        if result:
-            return self._add_torrent('file', file=result.content)
-        return False
-
-    def _add_torrent_uri(self, result):
-
-        if result:
-            return self._add_torrent('magnet', uri=result.url, btih=result.hash)
-        return False
-
-    #def _set_torrent_ratio(self, name):
+    # def _set_torrent_ratio(self, name):
 
         # if not name:
         # return False
@@ -119,16 +106,20 @@ class RtorrentAPI(GenericClient):
 
     #    return True
 
-    def test_authentication(self):
-        try:
-            self._get_auth()
+    def _get_auth(self):
 
-            if None is self.auth:
-                return False, 'Error: Unable to get %s authentication, check your config!' % self.name
-            return True, 'Success: Connected and Authenticated'
+        self.auth = None
+        if self.host:
+            try:
+                if self.host.startswith('scgi:'):
+                    self.username = self.password = None
+                self.auth = RTorrent(self.host, self.username, self.password)
+            except (AssertionError, xmlrpclib.ProtocolError):
+                pass
 
-        except (StandardError, Exception):
-            return False, 'Error: Unable to connect to %s' % self.name
+        # do tests here
+
+        return self.auth
 
 
 api = RtorrentAPI()

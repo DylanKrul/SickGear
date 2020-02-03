@@ -3,6 +3,7 @@
 #from sickbeard.common import *
 #from sickbeard.logger import reverseNames
 #from sickbeard.helpers import maybe_plural
+#from _23 import list_keys
 ##
 #set global $header = 'Log File'
 #set global $title = 'Logs'
@@ -21,9 +22,9 @@
 #end if
 
 <div class="h2footer pull-right">
-	<select name="minLevel" id="minLevel" class="form-control form-control-inline input-sm">
-#set $levels = $reverseNames.keys()
-#set void = $levels.sort(lambda x,y: cmp($reverseNames[$x], $reverseNames[$y]))
+	<select name="minLevel" id="minLevel" class="form-control form-control-inline input-sm pull-right">
+#set $levels = $list_keys($reverseNames)
+#set void = $levels.sort(key=lambda x: $reverseNames[$x])
 #set $level_count = len($levels)
 #for $level in $levels
     #set $level_count -= 1
@@ -32,6 +33,7 @@
 #end for
 
 	</select>
+    <div style="clear:right">FAQ: <a href="https://github.com/SickGear/SickGear/wiki/FAQ-Why-Not-Found" title="a common question for people here">Episode not found / Snatch failed</a></div>
 </div>
 
 <div class="align-left" style="margin:30px 0"><pre>
@@ -42,7 +44,7 @@
 <!--
 \$(document).ready(function(){
 	\$('#minLevel').change(function(){
-		window.location.href = '$sbRoot/errorlogs/viewlog/?$log_level_var=' + \$(this).val()
+		window.location.href = '$sbRoot/events/view-log/?$log_level_var=' + \$(this).val()
 	});
 
     window.setInterval('location.reload(true)', 600000); // Refresh every 10 minutes

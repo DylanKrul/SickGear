@@ -1,30 +1,41 @@
 /* =======================================================================
 inc_top.tmpl
 ========================================================================== */
+.shows-not-found.n .snf .sgicon-warning,
 .navbar-default .navbar-nav .logger.errors.n,
 pre .prelight{
 	color:#6f8c53
 }
 
+.shows-not-found.nn .snf .sgicon-warning,
 .navbar-default .navbar-nav .logger.errors.nn,
 pre .prelight2{
 	color:#b7b82c
 }
 
+.shows-not-found.nnn .snf .sgicon-warning,
 .navbar-default .navbar-nav .logger.errors.nnn,
 pre .prelight-num{
 	color:#eaab52
 }
 
+.shows-not-found.nnnn .snf .sgicon-warning,
 .navbar-default .navbar-nav .logger.errors.nnnn{
 	color:#ff6d5e
 }
+
+.snf .pulse,
+.shows-not-found.n .snf .pulse{ border-color:#6f8c53 }
+.shows-not-found.nn .snf .pulse{ border-color:#b7b82c }
+.shows-not-found.nnn .snf .pulse{ border-color:#eaab52 }
+.shows-not-found.nnnn .snf .pulse{ border-color:#ff6d5e }
 
 [class^="icon-"],
 [class*=" icon-"]{
 	background-image:url("../images/glyphicons-halflings-white.png")
 }
 
+.dark-bg .icon-glyph,
 .icon-white{
 	background-image:url("../images/glyphicons-halflings.png")
 }
@@ -56,10 +67,16 @@ pre .prelight-num{
 	background:#dcdcdc url("../css/lib/images/ui-bg_highlight-soft_75_dcdcdc_1x100.png") 50% top repeat-x
 }
 
+.ui-widget.ui-widget-content{
+	border-color:#fff
+}
+
+.component-group.bubblelist a,
 .ui-widget-content a{
 	color:rgb(42, 100, 150)
 }
 
+.component-group.bubblelist a:hover,
 .ui-widget-content a:hover{
 	color:#09a2ff
 }
@@ -69,10 +86,16 @@ pre .prelight-num{
 }
 
 .ui-state-default,
+.ui-widget.ui-button,
+.ui-widget.ui-button:active,
 .ui-widget-content .ui-state-default,
 .ui-widget-header .ui-state-default{
 	background:#fff;
 	border:1px solid #ccc
+}
+
+.ui-widget.ui-button:hover{
+	border-color:#ccc
 }
 
 .ui-state-hover,
@@ -116,21 +139,29 @@ pre .prelight-num{
 }
 
 .ui-state-hover .ui-icon,
-.ui-state-focus .ui-icon{
+.ui-state-focus .ui-icon,
+.ui-button:hover .ui-icon,
+.ui-button:focus .ui-icon{
 	background-image:url("../css/lib/images/ui-icons_222222_256x240.png")
 }
 
-.ui-state-active .ui-icon{
+.ui-state-active .ui-icon,
+.ui-button:active .ui-icon{
 	background-image:url("../css/lib/images/ui-icons_8c291d_256x240.png")
 }
 
-.ui-state-highlight .ui-icon{
+.ui-state-highlight .ui-icon,
+.ui-button .ui-state-highlight.ui-icon{
 	background-image:url("../css/lib/images/ui-icons_2e83ff_256x240.png")
 }
 
 .ui-state-error .ui-icon,
 .ui-state-error-text .ui-icon{
 	background-image:url("../css/lib/images/ui-icons_cd0a0a_256x240.png")
+}
+
+.ui-button .ui-icon{
+	background-image:url("../css/lib/images/ui-icons_8c291d_256x240.png")
 }
 
 .ui-widget-overlay{
@@ -290,11 +321,13 @@ a.ui-font{
 	background-image:linear-gradient(to left, rgba(223, 218, 207, 1), rgba(223, 218, 207, 0))
 }
 
+.show-toggle-hide,
 td.tvShow a{
 	color:#000;
 	text-decoration:none
 }
 
+.show-toggle-hide:hover,
 td.tvShow a:hover span,
 td.tvShow a:hover{
 	cursor:pointer;
@@ -319,7 +352,7 @@ home_newShow.tmpl
 	border-color:#dfdede
 }
 
-.step-one #searchResults .alt{
+.step-one #search-results .alt{
 	background-color:rgb(245, 245, 245)
 }
 
@@ -327,6 +360,7 @@ home_newShow.tmpl
 	color:#909090
 }
 
+.btn-inverse.dark-bg,
 #addRootDirTable td label .filepath,
 .grey-text{color:#666}
 .highlight-text{color:#000}
@@ -463,7 +497,9 @@ body#display-show.back-art,
 .back-art.pro.ii .day-of-week .day-number,
 .translucent.pro.ii .day-of-week .day-number,
 .back-art.pro.ii .sickbeardTable .seasoncols th,
-.translucent.pro.ii .sickbeardTable .seasoncols th{
+.translucent.pro.ii .sickbeardTable .seasoncols th,
+#display-show.back-art.pro.ii .sickbeardTable .seasoncols th,
+#display-show.translucent.pro.ii .sickbeardTable .seasoncols th{
 	background-color:rgba(51, 51, 51, 0.7)
 }
 
@@ -605,12 +641,18 @@ config*.tmpl
 	border-bottom:1px dotted #666
 }
 
+.qr-btn .glyphicon-qrcode,
 .component-group-desc p{
 	color:#666
 }
 
-.testNotification{
+.dotted-surround,
+.test-notification{
 	border:1px dotted #ccc
+}
+
+.provider-enabled{
+	box-shadow:-26px 0 0 0 rgb(199, 219, 64) inset
 }
 
 .infoTableSeperator{
@@ -712,6 +754,60 @@ manage*.tmpl
 
 a.whitelink{
 	color:#000
+}
+
+/* TABLE BACKGROUND color */
+.provider-failures.hover-highlight td:before,
+.provider-failures.focus-highlight td:before{
+	background:#fff
+}
+
+/* ODD ZEBRA STRIPE color (needs zebra widget) */
+.provider-failures.hover-highlight .odd th:before,
+.provider-failures.hover-highlight .odd td:before,
+.provider-failures.focus-highlight .odd th:before,
+.provider-failures.focus-highlight .odd td:before{
+	background:#f5f1e4
+}
+/* EVEN ZEBRA STRIPE color (needs zebra widget) */
+.provider-failures.hover-highlight .even th:before,
+.provider-failures.hover-highlight .even td:before,
+.provider-failures.focus-highlight .even th:before,
+.provider-failures.focus-highlight .even td:before{
+	background-color:#dfdacf;
+}
+
+/* HOVER ROW highlight colors */
+.provider-failures.hover-highlight tbody > tr:hover > td, /* override tablesorter theme row hover */
+.provider-failures.hover-highlight tbody > tr.odd:hover > td,
+.provider-failures.hover-highlight tbody > tr.even:hover > td{
+	background-color:#f4f3c2
+}
+/* HOVER COLUMN highlight colors */
+.provider-failures.hover-highlight tbody tr th:hover::after,
+.provider-failures.hover-highlight tbody tr td:hover::after{
+	background-color:#f4f3c2
+}
+
+/* FOCUS ROW highlight color (touch devices) */
+.provider-failures.focus-highlight th:focus::before,
+.provider-failures.focus-highlight td:focus::before{
+	background-color:#dfdead
+}
+/* FOCUS COLUMN highlight color (touch devices) */
+.provider-failures.focus-highlight th:focus::after,
+.provider-failures.focus-highlight td:focus::after{
+	background-color:#dfdead
+}
+/* FOCUS CELL highlight color */
+.provider-failures.focus-highlight th:focus,
+.provider-failures.focus-highlight td:focus,
+.provider-failures.focus-highlight .odd th:focus,
+.provider-failures.focus-highlight .odd td:focus,
+.provider-failures.focus-highlight .even th:focus,
+.provider-failures.focus-highlight .even td:focus{
+	background-color:#dfdead;
+	color:#222
 }
 
 /* =======================================================================
@@ -873,12 +969,17 @@ fieldset[disabled] .navbar-default .btn-link:focus{
 	color:#ccc
 }
 
-.dropdown-menu > li > a:hover, .dropdown-menu > li > a:focus{
+.dropdown-menu li > a{
+	color:#333
+}
+
+.dropdown-menu li > a:hover, .dropdown-menu li > a:focus{
 	color:#fff;
 	text-decoration:none;
 	background-color:#333
 }
 
+.component-group.bubblelist .bgcol,
 .dropdown-menu{
 	background-color:#f5f1e4;
 	border:1px solid rgba(0, 0, 0, 0.15);
@@ -1230,16 +1331,22 @@ input sizing (for config pages)
 ========================================================================== */
 
 .showlist-select optgroup,
+#set-status optgroup,
+#results-sortby optgroup,
 #pickShow optgroup,
 #showfilter optgroup,
+#showsort optgroup,
 #editAProvider optgroup{
 	color:#eee;
 	background-color:#888
 }
 
 .showlist-select optgroup option,
+#set-status optgroup option,
+#results-sortby optgroup option,
 #pickShow optgroup option,
 #showfilter optgroup option,
+#showsort optgroup option,
 #editAProvider optgroup option{
 	color:#222;
 	background-color:#fff
@@ -1293,7 +1400,7 @@ div.stepsguide .disabledstep p{
 	color:#8a775e
 }
 
-.stepDiv #searchResults div .exists-db{
+.stepDiv #search-results div .exists-db{
 	color:#1178B3
 }
 
@@ -1302,7 +1409,7 @@ div.formpaginate .prev, div.formpaginate .next{
 	background:#57442b
 }
 
-#customQualityWrapper .tip-text p{
+#custom-quality-wrapper .tip-text p{
 	color:#666
 }
 
@@ -1348,8 +1455,8 @@ tablesorter.css
 }
 
 thead.tablesorter-stickyHeader{
-	border-top:2px solid #fff;
-	border-bottom:2px solid #fff
+	border-top:2px solid #ddd;
+	border-bottom:2px solid #ddd
 }
 
 /* Zebra Widget - row alternating colors */
@@ -1371,7 +1478,7 @@ thead.tablesorter-stickyHeader{
 }
 
 .tablesorter tfoot tr{
-	color:#fff;
+	color:#ddd;
 	text-align:center;
 	text-shadow:-1px -1px 0 rgba(0, 0, 0, 0.3);
 	background-color:#333;
@@ -1380,66 +1487,6 @@ thead.tablesorter-stickyHeader{
 
 .tablesorter tfoot a{
 	color:#fff
-}
-
-/* =======================================================================
-token-input.css
-========================================================================== */
-
-ul.token-input-list{
-	border:1px solid #ccc;
-	background-color:#fff
-}
-
-ul.token-input-list li input{
-	border:0;
-	background-color:white
-}
-
-li.token-input-token{
-	background-color:#d0efa0;
-	color:#000
-}
-
-li.token-input-token span{
-	color:#777
-}
-
-li.token-input-selected-token{
-	background-color:#08844e;
-	color:#fff
-}
-
-li.token-input-selected-token span{
-	color:#bbb
-}
-
-div.token-input-dropdown{
-	background-color:#fff;
-	color:#000;
-	border-left-color:#ccc;
-	border-right-color:#ccc;
-	border-bottom-color:#ccc
-}
-
-div.token-input-dropdown p{
-	color:#777
-}
-
-div.token-input-dropdown ul li{
-	background-color:#fff
-}
-
-div.token-input-dropdown ul li.token-input-dropdown-item{
-	background-color:#fafafa
-}
-
-div.token-input-dropdown ul li.token-input-dropdown-item2{
-	background-color:#fff
-}
-
-div.token-input-dropdown ul li.token-input-selected-dropdown-item{
-	background-color:#6196c2
 }
 
 /* =======================================================================

@@ -8,9 +8,10 @@ import unittest
 sys.path.insert(1, os.path.abspath('..'))
 sys.path.insert(1, os.path.abspath('../lib'))
 
-from sickbeard.name_parser import parser
-
 import sickbeard
+from sickbeard import name_cache, tv
+from sickbeard.classes import OrderedDefaultdict
+from sickbeard.name_parser import parser
 
 sickbeard.SYS_ENCODING = 'UTF-8'
 
@@ -43,6 +44,13 @@ simple_test_cases = {
             parser.ParseResult(None, 'Show Name', 1, [2], 'Source.Quality.Etc', 'Group'),
     },
 
+    'non_standard_multi_ep': {
+        'Show Name - S01E02and03 - My Ep Name': parser.ParseResult(None, 'Show Name', 1, [2, 3], 'My Ep Name'),
+        'Show Name - S01E02and03and04 - My Ep Name': parser.ParseResult(None, 'Show Name', 1, [2, 3, 4], 'My Ep Name'),
+        'Show Name - S01E02to03 - My Ep Name': parser.ParseResult(None, 'Show Name', 1, [2, 3], 'My Ep Name'),
+        'Show Name - S01E02&3&4 - My Ep Name': parser.ParseResult(None, 'Show Name', 1, [2, 3, 4], 'My Ep Name'),
+    },
+
     'fov': {
         'Show_Name.1x02.Source_Quality_Etc-Group':
             parser.ParseResult(None, 'Show Name', 1, [2], 'Source_Quality_Etc', 'Group'),
@@ -57,6 +65,11 @@ simple_test_cases = {
         'Show-Name-1x02-1080i': parser.ParseResult(None, 'Show-Name', 1, [2], '1080i'),
         'Show Name [05x12] Ep Name': parser.ParseResult(None, 'Show Name', 5, [12], 'Ep Name'),
         'Show.Name.1x02.WEB-DL': parser.ParseResult(None, 'Show Name', 1, [2], 'WEB-DL'),
+    },
+
+    'fov_non_standard_multi_ep': {
+        'Show_Name.1x02and03and04.Source_Quality_Etc-Group':
+            parser.ParseResult(None, 'Show Name', 1, [2, 3, 4], 'Source_Quality_Etc', 'Group'),
     },
 
     'standard_repeat': {
@@ -154,6 +167,11 @@ simple_test_cases = {
         '23-11-2010 - Ep Name': parser.ParseResult(None, extra_info='Ep Name', air_date=datetime.date(2010, 11, 23)),
         'Show.Name.23.11.2010.WEB-DL':
             parser.ParseResult(None, 'Show Name', None, [], 'WEB-DL', None, datetime.date(2010, 11, 23)),
+    },
+
+    'folder_filename': {
+        'Show.Name.S01.DVDRip.XviD-NOGRP/1x10 - The Episode Name.avi':
+            parser.ParseResult(None, 'Show Name', 1, [10], 'The Episode Name', 'NOGRP')
     },
 
     'anime_ultimate': {
@@ -271,10 +289,14 @@ simple_test_cases = {
         '165-166.3x3 Eyes.S08E014E015': parser.ParseResult(None, '3x3 Eyes', 8, [14, 15], None, None, None, [165, 166]),
     },
 
-    'anime_bare': {
+    'anime_bare_ep': {
+        'Show Name 123 - 001 - Ep 1 name': parser.ParseResult(None, 'Show Name 123', None, [], None, None, None, [1]),
         'One Piece 102': parser.ParseResult(None, 'One Piece', None, [], None, None, None, [102]),
         'bleach - 010': parser.ParseResult(None, 'bleach', None, [], None, None, None, [10]),
         'Naruto Shippuden - 314v2': parser.ParseResult(None, 'Naruto Shippuden', None, [], None, None, None, [314]),
+    },
+
+    'anime_bare': {
         'Blue Submarine No. 6 104-105':
             parser.ParseResult(None, 'Blue Submarine No. 6', None, [], None, None, None, [104, 105]),
         'Samurai X: Trust & Betrayal (OVA) 001-002':
@@ -336,24 +358,73 @@ unicode_test_cases = [
 
 failure_cases = ['7sins-jfcs01e09-720p-bluray-x264']
 
+invalid_cases = [('The.Show.Name.111E14.1080p.WEB.x264-GROUP', 'the show name', 11, 1, False)]
 
-class UnicodeTests(test.SickbeardTestDBCase):
+extra_info_no_name_tests = [('The Show Name', [('Episode 302', 3, 2)],
+                             'The.Show.Name.S03E02.REPACK.Episode.302.720p.AMZN.WEBRip.DDP5.1.x264-GROUP',
+                             'REPACK.720p.AMZN.WEBRip.DDP5.1.x264'),
+                            ('The Show Name', [('Episode 302', 3, 2)],
+                             'The.Show.Name.S03E02.Episode.302.REPACK.720p.AMZN.WEBRip.DDP5.1.x264-GROUP',
+                             'REPACK.720p.AMZN.WEBRip.DDP5.1.x264'),
+                            ('The Show Name', [('Episode 302', 3, 2)],
+                             'The.Show.Name.S03E02.Episode.302.REPACK.720p.AMZN.WEBRip.DDP5.1.x264-GROUP',
+                             'REPACK.720p.AMZN.WEBRip.DDP5.1.x264'),
+                            ('The Show Name', [('Episode 302', 3, 2)],
+                             'The.Show.Name.S03E02.REPACK.720p.AMZN.WEBRip.DDP5.1.x264-GROUP',
+                             'REPACK.720p.AMZN.WEBRip.DDP5.1.x264'),
+                            ('The Show Name', [('Episode 302', 3, 2)],
+                             'The.Show.Name.S03E02.720p.AMZN.WEBRip.DDP5.1.x264-GROUP',
+                             '720p.AMZN.WEBRip.DDP5.1.x264'),
+                            ('The Show Name', [('Episode 302', 3, 2), ('Name 2', 3, 3)],
+                             'The.Show.Name.S03E02E03.720p.AMZN.WEBRip.DDP5.1.x264-GROUP',
+                             '720p.AMZN.WEBRip.DDP5.1.x264'),
+                            ('The Show Name', [('Episode 302', 3, 2), ('Name 2', 3, 3)],
+                             'The.Show.Name.S03E02E03.Episode.302.Name.2.720p.AMZN.WEBRip.DDP5.1.x264-GROUP',
+                             '720p.AMZN.WEBRip.DDP5.1.x264'),
+                            ('The Show Name', [('Episode 302', 3, 2), ('Name 2', 3, 3)],
+                             'The.Show.Name.S03E02E03.REPACK.Episode.302.Name.2.720p.AMZN.WEBRip.DDP5.1.x264-GROUP',
+                             'REPACK.720p.AMZN.WEBRip.DDP5.1.x264'),
+                            ('The Show Name', [('Episode 302', 3, 2), ('Name 2', 3, 3)],
+                             'The.Show.Name.S03E02E03.Episode.302.Name.2.REPACK.720p.AMZN.WEBRip.DDP5.1.x264-GROUP',
+                             'REPACK.720p.AMZN.WEBRip.DDP5.1.x264'),
+                            ]
+
+
+class InvalidCases(unittest.TestCase):
+
+    def _test_invalid(self, rls_name, show_name, prodid, tvid, is_anime):
+        sickbeard.showList.append(TVShowTest(name=rls_name, prodid=prodid, tvid=tvid, is_anime=is_anime))
+        name_cache.addNameToCache(show_name, tvid=tvid, prodid=prodid)
+        invalidexception = False
+        try:
+            _ = parser.NameParser(True).parse(rls_name)
+        except (parser.InvalidNameException, parser.InvalidShowException):
+            invalidexception = True
+        self.assertEqual(invalidexception, True)
+
+    def test_invalid(self):
+        for (rls_name, show_name, prodid, tvid, is_anime) in invalid_cases:
+            self._test_invalid(rls_name, show_name, prodid, tvid, is_anime)
+
+
+class UnicodeTests(unittest.TestCase):
 
     def _test_unicode(self, name, result):
         result.which_regex = ['fov']
         parse_result = parser.NameParser(True, testing=True).parse(name)
-        self.assertEqual(parse_result, result)
+        self.assertEqual(parse_result, result, msg=name)
 
         # this shouldn't raise an exception
         void = repr(str(parse_result))
         void += ''
 
     def test_unicode(self):
+        self.longMessage = True
         for (name, result) in unicode_test_cases:
             self._test_unicode(name, result)
 
 
-class FailureCaseTests(test.SickbeardTestDBCase):
+class FailureCaseTests(unittest.TestCase):
     @staticmethod
     def _test_name(name):
         np = parser.NameParser(True)
@@ -371,7 +442,7 @@ class FailureCaseTests(test.SickbeardTestDBCase):
             self.assertTrue(self._test_name(name))
 
 
-class ComboTests(test.SickbeardTestDBCase):
+class ComboTests(unittest.TestCase):
     def _test_combo(self, name, result, which_regexes):
 
         if VERBOSE:
@@ -402,7 +473,37 @@ class ComboTests(test.SickbeardTestDBCase):
             self._test_combo(os.path.normpath(name), result, which_regexes)
 
 
-class BasicTests(test.SickbeardTestDBCase):
+class BasicTests(unittest.TestCase):
+    def _test_folder_file(self, section, verbose=False):
+        if VERBOSE or verbose:
+            print('Running', section, 'tests')
+        for cur_test_base in simple_test_cases[section]:
+            cur_test_dir, cur_test_file = cur_test_base.split('/')
+            if VERBOSE or verbose:
+                print('Testing dir: %s file: %s' % (cur_test_dir, cur_test_file))
+
+            result = simple_test_cases[section][cur_test_base]
+            show_obj = TVShowTest(name=result.series_name)
+            np = parser.NameParser(testing=True, show_obj=show_obj)
+
+            if not result:
+                self.assertRaises(parser.InvalidNameException, np.parse, cur_test_file)
+                return
+            else:
+                test_result = np.parse(cur_test_file)
+
+            test_result.release_group = result.release_group
+
+            try:
+                # self.assertEqual(test_result.which_regex, [section])
+                self.assertEqual(test_result, result)
+            except (BaseException, Exception):
+                print('air_by_date:', test_result.is_air_by_date, 'air_date:', test_result.air_date)
+                print('anime:', test_result.is_anime, 'ab_episode_numbers:', test_result.ab_episode_numbers)
+                print(test_result)
+                print(result)
+                raise
+
     def _test_names(self, np, section, transform=None, verbose=False):
 
         if VERBOSE or verbose:
@@ -425,7 +526,7 @@ class BasicTests(test.SickbeardTestDBCase):
             try:
                 # self.assertEqual(test_result.which_regex, [section])
                 self.assertEqual(test_result, result)
-            except:
+            except (BaseException, Exception):
                 print('air_by_date:', test_result.is_air_by_date, 'air_date:', test_result.air_date)
                 print('anime:', test_result.is_anime, 'ab_episode_numbers:', test_result.ab_episode_numbers)
                 print(test_result)
@@ -440,6 +541,10 @@ class BasicTests(test.SickbeardTestDBCase):
         np = parser.NameParser(False, testing=True)
         self._test_names(np, 'standard_repeat')
 
+    def test_non_standard_multi_ep_names(self):
+        np = parser.NameParser(False, testing=True)
+        self._test_names(np, 'non_standard_multi_ep')
+
     def test_fov_names(self):
         np = parser.NameParser(False, testing=True)
         self._test_names(np, 'fov')
@@ -447,6 +552,10 @@ class BasicTests(test.SickbeardTestDBCase):
     def test_fov_repeat_names(self):
         np = parser.NameParser(False, testing=True)
         self._test_names(np, 'fov_repeat')
+
+    def test_fov_non_standard_multi_ep_names(self):
+        np = parser.NameParser(False, testing=True)
+        self._test_names(np, 'fov_non_standard_multi_ep')
 
     def test_bare_names(self):
         np = parser.NameParser(False, testing=True)
@@ -524,53 +633,122 @@ class BasicTests(test.SickbeardTestDBCase):
         np = parser.NameParser(testing=True)
         self._test_names(np, 'scene_date_format', lambda x: x + '.avi')
 
+    def test_folder_filename(self):
+        self._test_folder_file('folder_filename')
+
     def test_combination_names(self):
         pass
 
     def test_anime_ultimate(self):
-        np = parser.NameParser(False, TVShow(is_anime=True), testing=True)
+        np = parser.NameParser(False, TVShowTest(is_anime=True), testing=True)
         self._test_names(np, 'anime_ultimate')
 
     def test_anime_standard(self):
-        np = parser.NameParser(False, TVShow(is_anime=True), testing=True)
+        np = parser.NameParser(False, TVShowTest(is_anime=True), testing=True)
         self._test_names(np, 'anime_standard')
 
     def test_anime_ep_name(self):
-        np = parser.NameParser(False, TVShow(is_anime=True), testing=True)
+        np = parser.NameParser(False, TVShowTest(is_anime=True), testing=True)
         self._test_names(np, 'anime_ep_name')
 
     def test_anime_slash(self):
-        np = parser.NameParser(False, TVShow(is_anime=True), testing=True)
+        np = parser.NameParser(False, TVShowTest(is_anime=True), testing=True)
         self._test_names(np, 'anime_slash')
 
     def test_anime_codec(self):
-        np = parser.NameParser(False, TVShow(is_anime=True), testing=True)
+        np = parser.NameParser(False, TVShowTest(is_anime=True), testing=True)
         self._test_names(np, 'anime_standard_codec')
 
     def test_anime_and_normal(self):
-        np = parser.NameParser(False, TVShow(is_anime=True), testing=True)
+        np = parser.NameParser(False, TVShowTest(is_anime=True), testing=True)
         self._test_names(np, 'anime_and_normal')
 
     def test_anime_and_normal_reverse(self):
-        np = parser.NameParser(False, TVShow(is_anime=True), testing=True)
+        np = parser.NameParser(False, TVShowTest(is_anime=True), testing=True)
         self._test_names(np, 'anime_and_normal_reverse')
 
     def test_anime_and_normal_front(self):
-        np = parser.NameParser(False, TVShow(is_anime=True), testing=True)
+        np = parser.NameParser(False, TVShowTest(is_anime=True), testing=True)
         self._test_names(np, 'anime_and_normal_front')
 
+    def test_anime_bare_ep(self):
+        np = parser.NameParser(False, TVShowTest(is_anime=True), testing=True)
+        self._test_names(np, 'anime_bare_ep')
+
     def test_anime_bare(self):
-        np = parser.NameParser(False, TVShow(is_anime=True), testing=True)
+        np = parser.NameParser(False, TVShowTest(is_anime=True), testing=True)
         self._test_names(np, 'anime_bare')
 
 
-class TVShow(object):
-    def __init__(self, is_anime=False):
-        self.is_anime = is_anime
+class TVShowTest(tv.TVShow):
+    # noinspection PyMissingConstructor
+    def __init__(self, is_anime=False, name='', prodid=0, tvid=0):
+        self._anime = is_anime
+        self._name = name
+        self._tvid = tvid
+        self._prodid = prodid
+        self.sxe_ep_obj = {}
 
 
-if __name__ == '__main__':
-    if len(sys.argv) > 1:
+class TVEpisodeTest(tv.TVEpisode):
+    # noinspection PyMissingConstructor
+    def __init__(self, name=''):
+        self._name = name
+
+
+class ExtraInfoNoNameTests(test.SickbeardTestDBCase):
+    def setUp(self):
+        super(ExtraInfoNoNameTests, self).setUp()
+        self.oldregex = parser.regex
+
+    def tearDown(self):
+        super(ExtraInfoNoNameTests, self).tearDown()
+        parser.regex = self.oldregex
+
+    def test_extra_info_no_name(self):
+        for i in range(2):
+            if 1 == i:
+                if None is parser.regex:
+                    # only retest if regex lib is installed, now test re lib
+                    continue
+                parser.regex = None
+            for case in extra_info_no_name_tests:
+                tvs = TVShowTest(False, case[0], 2, 1)
+                for e in case[1]:
+                    tvs.sxe_ep_obj.setdefault(e[1], {}).update({e[2]: TVEpisodeTest(e[0])})
+
+                sickbeard.showList = [tvs]
+                name_cache.nameCache = {}
+                name_cache.buildNameCache()
+
+                np = parser.NameParser()
+                r = np.parse(case[2], cache_result=False)
+                n_ep = r.extra_info_no_name()
+                self.assertEqual(n_ep, case[3])
+
+
+class OrderedDefaultdictTests(unittest.TestCase):
+
+    def test_ordereddefaultdict(self):
+
+        d = OrderedDefaultdict()
+        d['key1'] = 'test_item1'
+        d['key2'] = 'test_item2'
+        d['key3'] = 'test_item3'
+        self.assertEqual('key1', d.first_key())
+        del d['key1']
+        d['key4'] = 'test_item4'
+        d.move_to_end('key2')
+        self.assertEqual('test_item2', d['key2'])
+        self.assertEqual('key2', d.last_key())
+        _ = 'end'
+
+
+if '__main__' == __name__:
+    suite = unittest.TestLoader().loadTestsFromTestCase(OrderedDefaultdictTests)
+    unittest.TextTestRunner(verbosity=2).run(suite)
+
+    if 1 < len(sys.argv):
         suite = unittest.TestLoader().loadTestsFromName('name_parser_tests.BasicTests.test_' + sys.argv[1])
     else:
         suite = unittest.TestLoader().loadTestsFromTestCase(BasicTests)
@@ -583,4 +761,10 @@ if __name__ == '__main__':
     unittest.TextTestRunner(verbosity=2).run(suite)
 
     suite = unittest.TestLoader().loadTestsFromTestCase(FailureCaseTests)
+    unittest.TextTestRunner(verbosity=2).run(suite)
+
+    suite = unittest.TestLoader().loadTestsFromTestCase(InvalidCases)
+    unittest.TextTestRunner(verbosity=2).run(suite)
+
+    suite = unittest.TestLoader().loadTestsFromTestCase(ExtraInfoNoNameTests)
     unittest.TextTestRunner(verbosity=2).run(suite)
